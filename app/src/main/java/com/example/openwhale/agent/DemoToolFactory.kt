@@ -3,11 +3,16 @@ package com.example.openwhale.agent
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 object DemoToolFactory {
@@ -32,7 +37,7 @@ object DemoToolFactory {
       definition =
         AgentToolDefinition(
           name = "search_destination",
-          description = "查询目的地候选数据。只返回候选地点，不直接展示卡片。若需要让用户选择，请随后调用 emit_option_card 并传 card_kind=destination_candidates。",
+          description = "查询目的地候选数据。只返回候选地点，不直接展示卡片。若需要让用户选择，请随后调用 emit_option_card，并优先直接填写 title、description、options、callback_prompt_text；只有想复用预制模板时才传 card_kind=destination_candidates。",
           parametersSchema =
             buildJsonObject {
               put("type", JsonPrimitive("object"))
@@ -266,7 +271,8 @@ object DemoToolFactory {
       definition =
         AgentToolDefinition(
           name = "emit_option_card",
-          description = "发出用户可点击的 option 卡片。用途：destination_candidates 用于地点歧义确认，hotel_price 用于收集预算，hotel_distance 用于收集距离。只有确实需要用户明确选择时才调用。",
+          description =
+            "发出用户可点击的通用 option 卡片。优先直接传 title、description、options、allow_custom_input、custom_input_hint，让 agent 自己填写卡片文案和每个选项的 callback prompt。每个选项优先填写 callback_prompt_text；也兼容旧字段 prompt_text。结构化选择信息优先放在 selection 对象里；也兼容旧字段 selected_destination_name、max_price、max_distance_km。为了兼容旧流程，也允许继续传 card_kind=destination_candidates / hotel_price / hotel_distance 来复用预制模板。示例：title='你想去哪一个？'，options=[{id:'jingan_temple',title:'静安寺',supporting_text:'静安区 · 寺庙景点',callback_prompt_text:'我选 静安寺',selection:{selected_destination_name:'静安寺'}}]。",
           parametersSchema =
             buildJsonObject {
               put("type", JsonPrimitive("object"))
@@ -281,17 +287,78 @@ object DemoToolFactory {
                       put("enum", JsonArray(listOf(JsonPrimitive("destination_candidates"), JsonPrimitive("hotel_price"), JsonPrimitive("hotel_distance"))))
                     },
                   )
+                  put("title", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("卡片标题，推荐直接填写")) })
+                  put("description", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("卡片描述，可选")) })
+                  put("allow_custom_input", buildJsonObject { put("type", JsonPrimitive("boolean")); put("description", JsonPrimitive("是否允许用户直接改用自然语言输入")) })
+                  put("custom_input_hint", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("自定义输入提示文案，可选")) })
+                  put(
+                    "options",
+                    buildJsonObject {
+                      put("type", JsonPrimitive("array"))
+                      put("description", JsonPrimitive("可点击选项列表，建议 1-6 个"))
+                      put(
+                        "items",
+                        buildJsonObject {
+                          put("type", JsonPrimitive("object"))
+                          put(
+                            "properties",
+                            buildJsonObject {
+                              put("id", buildJsonObject { put("type", JsonPrimitive("string")) })
+                              put("title", buildJsonObject { put("type", JsonPrimitive("string")) })
+                              put("supporting_text", buildJsonObject { put("type", JsonPrimitive("string")) })
+                              put("callback_prompt_text", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("点击该选项后优先回传给 agent 的文本")) })
+                              put("prompt_text", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("点击该选项后回传给 agent 的文本")) })
+                              put("display_text", buildJsonObject { put("type", JsonPrimitive("string")); put("description", JsonPrimitive("时间线中展示给用户的点击结果文案，可选")) })
+                              put(
+                                "selection",
+                                buildJsonObject {
+                                  put("type", JsonPrimitive("object"))
+                                  put("description", JsonPrimitive("可选的结构化选择信息，推荐优先写在这里"))
+                                  put(
+                                    "properties",
+                                    buildJsonObject {
+                                      put("selected_destination_name", buildJsonObject { put("type", JsonPrimitive("string")) })
+                                      put("max_price", buildJsonObject { put("type", JsonPrimitive("integer")) })
+                                      put("max_distance_km", buildJsonObject { put("type", JsonPrimitive("integer")) })
+                                    },
+                                  )
+                                },
+                              )
+                              put("selected_destination_name", buildJsonObject { put("type", JsonPrimitive("string")) })
+                              put("max_price", buildJsonObject { put("type", JsonPrimitive("integer")) })
+                              put("max_distance_km", buildJsonObject { put("type", JsonPrimitive("integer")) })
+                            },
+                          )
+                          put("required", JsonArray(listOf(JsonPrimitive("id"), JsonPrimitive("title"))))
+                        },
+                      )
+                    },
+                  )
                 },
               )
-              put("required", JsonArray(listOf(JsonPrimitive("card_kind"))))
             },
         ),
       executor = AgentToolExecutor { arguments, currentState ->
-        val cardKind = arguments["card_kind"]?.jsonPrimitive?.content
-        val card = AgentCardValidator.validate(DemoCardPlanner.buildOptionCardByKind(cardKind.orEmpty(), currentState))
+        val cardKind = arguments["card_kind"]?.jsonPrimitive?.contentOrNull
+        val card =
+          AgentCardValidator.validate(
+            buildGenericOptionCard(arguments = arguments, currentState = currentState, cardKind = cardKind),
+          )
         ToolExecutionResult(
-          displayText = "emit_option_card 已发出 ${cardKind.orEmpty()} 选项卡。",
-          modelPayload = json.encodeToString(buildJsonObject { put("card_type", JsonPrimitive("option")); put("card_kind", JsonPrimitive(cardKind.orEmpty())) }),
+          displayText =
+            if (cardKind.isNullOrBlank()) {
+              "emit_option_card 已发出通用选项卡。"
+            } else {
+              "emit_option_card 已发出 ${cardKind} 选项卡。"
+            },
+          modelPayload =
+            json.encodeToString(
+              buildJsonObject {
+                put("card_type", JsonPrimitive("option"))
+                cardKind?.let { put("card_kind", JsonPrimitive(it)) }
+                put("title", JsonPrimitive((card as? OptionCardPayload)?.title.orEmpty()))
+              },
+            ),
           nextState = currentState,
           cardPayload = requireNotNull(card) { "option 卡片校验失败。" },
         )
@@ -299,6 +366,64 @@ object DemoToolFactory {
       kind = AgentToolKind.Card,
     )
   }
+
+  private fun buildGenericOptionCard(arguments: JsonObject, currentState: SessionContextState, cardKind: String?): OptionCardPayload {
+    val explicitTitle = arguments["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+    val explicitOptions = parseOptionChoices(arguments["options"], cardId = null)
+
+    if (explicitTitle.isBlank() && explicitOptions.isEmpty()) {
+      require(!cardKind.isNullOrBlank()) { "emit_option_card 需要提供 card_kind，或直接提供 title 与 options。" }
+      return DemoCardPlanner.buildOptionCardByKind(cardKind = cardKind, state = currentState)
+    }
+
+    val template = cardKind?.takeIf(String::isNotBlank)?.let { DemoCardPlanner.templateByKind(it, currentState) }
+    val cardId = newOptionCardId()
+    val options =
+      parseOptionChoices(arguments["options"], cardId = cardId)
+        .ifEmpty {
+          template?.options?.map { option ->
+            option.copy(action = option.action.copy(sourceCardId = cardId))
+          } ?: emptyList()
+        }
+
+    return DemoCardPlanner.genericOptionCard(
+      title = explicitTitle.ifBlank { template?.title.orEmpty() },
+      description = arguments["description"]?.jsonPrimitive?.contentOrNull ?: template?.description,
+      options = options,
+      allowCustomInput = arguments["allow_custom_input"]?.jsonPrimitive?.booleanOrNull ?: template?.allowCustomInput ?: false,
+      customInputHint = arguments["custom_input_hint"]?.jsonPrimitive?.contentOrNull ?: template?.customInputHint,
+      cardId = cardId,
+    )
+  }
+
+  private fun parseOptionChoices(element: JsonElement?, cardId: String?): List<OptionCardChoice> {
+    val options = element?.jsonArray ?: return emptyList()
+    return options.map { optionElement ->
+      val optionObject = optionElement.jsonObject
+      val selectionObject = optionObject["selection"]?.jsonObject
+      val promptText = optionObject["callback_prompt_text"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank {
+        optionObject.stringValue("prompt_text")
+      }
+      OptionCardChoice(
+        id = optionObject.stringValue("id"),
+        title = optionObject.stringValue("title"),
+        supportingText = optionObject["supporting_text"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf(String::isNotEmpty),
+        action =
+          SelectionAction(
+            promptText = promptText,
+            displayText = optionObject["display_text"]?.jsonPrimitive?.contentOrNull ?: optionObject.stringValue("title"),
+            selectedDestinationName = selectionObject?.get("selected_destination_name")?.jsonPrimitive?.contentOrNull ?: optionObject["selected_destination_name"]?.jsonPrimitive?.contentOrNull,
+            maxPrice = selectionObject?.get("max_price")?.jsonPrimitive?.intOrNull ?: optionObject["max_price"]?.jsonPrimitive?.intOrNull,
+            maxDistanceKm = selectionObject?.get("max_distance_km")?.jsonPrimitive?.intOrNull ?: optionObject["max_distance_km"]?.jsonPrimitive?.intOrNull,
+            sourceCardId = cardId,
+          ),
+      )
+    }
+  }
+
+  private fun JsonObject.stringValue(key: String): String = this[key]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+
+  private fun newOptionCardId(): String = "option-${java.util.UUID.randomUUID()}"
 
   private fun emitRouteCardTool(): RegisteredAgentTool {
     return RegisteredAgentTool(

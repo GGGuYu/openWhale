@@ -3,7 +3,9 @@ package com.example.openwhale.ui.main
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.example.openwhale.agent.AgentSessionSnapshot
 import com.example.openwhale.agent.HotelFilterContext
 import com.example.openwhale.agent.OptionCardChoice
@@ -29,6 +31,8 @@ class MainScreenTest {
           AgentSessionSnapshot(
             timeline =
               listOf(
+                TimelineItem(id = "status-1", role = TimelineItemRole.Status, title = "工作流", text = "当前工作流：导航找酒店 Demo。"),
+                TimelineItem(id = "user-1", role = TimelineItemRole.User, title = "你", text = "导航到静安寺"),
                 TimelineItem(
                   id = "assistant-1",
                   role = TimelineItemRole.Assistant,
@@ -71,9 +75,28 @@ class MainScreenTest {
   }
 
   @Test
-  fun apiKeyPanel_isRendered() {
+  fun compactShell_isRendered() {
+    composeTestRule.onNodeWithText("OpenWhale").assertIsDisplayed()
+    composeTestRule.onNodeWithText("历史").assertIsDisplayed()
+    composeTestRule.onNodeWithText("设置").assertIsDisplayed()
+  }
+
+  @Test
+  fun messageAvatar_isRendered() {
+    composeTestRule.onNodeWithContentDescription("助手头像").assertIsDisplayed()
+  }
+
+  @Test
+  fun settingsSheet_canBeOpened() {
+    composeTestRule.onNodeWithText("设置").performClick()
     composeTestRule.onNodeWithText("DeepSeek Key").assertIsDisplayed()
-    composeTestRule.onNodeWithText("更新 DeepSeek API Key").assertIsDisplayed()
     composeTestRule.onNodeWithText("保存本地 Key").assertIsDisplayed()
+  }
+
+  @Test
+  fun historySheet_canBeOpened() {
+    composeTestRule.onNodeWithText("历史").performClick()
+    composeTestRule.onNodeWithText("最近对话").assertIsDisplayed()
+    composeTestRule.onNodeWithText("导航到静安寺").assertIsDisplayed()
   }
 }

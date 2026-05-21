@@ -5,6 +5,14 @@ import java.util.UUID
 object DemoCardPlanner {
   private val hotelPlatforms = listOf("携程", "美团")
 
+  data class OptionCardTemplate(
+    val title: String,
+    val description: String? = null,
+    val options: List<OptionCardChoice>,
+    val allowCustomInput: Boolean = false,
+    val customInputHint: String? = null,
+  )
+
   fun destinationCard(
     candidates: List<DestinationCandidate>,
     cardId: String = newCardId("destination"),
@@ -167,6 +175,35 @@ object DemoCardPlanner {
     }
   }
 
+  fun templateByKind(cardKind: String, state: SessionContextState): OptionCardTemplate {
+    val card = buildOptionCardByKind(cardKind = cardKind, state = state)
+    return OptionCardTemplate(
+      title = card.title,
+      description = card.description,
+      options = card.options,
+      allowCustomInput = card.allowCustomInput,
+      customInputHint = card.customInputHint,
+    )
+  }
+
+  fun genericOptionCard(
+    title: String,
+    description: String?,
+    options: List<OptionCardChoice>,
+    allowCustomInput: Boolean,
+    customInputHint: String?,
+    cardId: String = newCardId("option"),
+  ): OptionCardPayload {
+    return OptionCardPayload(
+      cardId = cardId,
+      title = title.trim(),
+      description = description?.trim()?.takeIf(String::isNotEmpty),
+      options = options,
+      allowCustomInput = allowCustomInput,
+      customInputHint = customInputHint?.trim()?.takeIf(String::isNotEmpty),
+    )
+  }
+
   fun maybeBuildAssistantCardFallback(
     workflowPackId: String,
     responseText: String?,
@@ -230,7 +267,24 @@ object AgentCardValidator {
   fun validate(card: AgentCardPayload?): AgentCardPayload? {
     card ?: return null
     return when (card) {
-      is OptionCardPayload -> card.takeIf { it.cardId.isNotBlank() && it.title.isNotBlank() && it.options.isNotEmpty() && it.options.all { option -> option.title.isNotBlank() && option.action.promptText.isNotBlank() } }
+      is OptionCardPayload ->
+        card.takeIf {
+          it.cardId.isNotBlank() &&
+            it.title.isNotBlank() &&
+            it.options.size in 1..6 &&
+            (!it.allowCustomInput || !it.customInputHint.isNullOrBlank()) &&
+            it.options.map(OptionCardChoice::id).distinct().size == it.options.size &&
+            it.options.all { option ->
+              option.id.isNotBlank() &&
+                option.title.isNotBlank() &&
+                option.supportingText?.isNotBlank() != false &&
+                option.action.promptText.isNotBlank() &&
+                option.action.displayText.isNotBlank() &&
+                (option.action.sourceCardId == null || option.action.sourceCardId == it.cardId) &&
+                (option.action.maxPrice == null || option.action.maxPrice > 0) &&
+                (option.action.maxDistanceKm == null || option.action.maxDistanceKm > 0)
+            }
+        }
       is RouteCardPayload -> card.takeIf { it.destinationName.isNotBlank() && it.routes.size == 4 && it.routes.all { route -> route.title.isNotBlank() } && it.openMapAction.uri.isNotBlank() }
       is HotelListCardPayload -> card.takeIf { it.hotels.isNotEmpty() && it.platformStatuses.isNotEmpty() && it.hotels.all { hotel -> hotel.platformQuotes.isNotEmpty() && hotel.name.isNotBlank() } }
     }

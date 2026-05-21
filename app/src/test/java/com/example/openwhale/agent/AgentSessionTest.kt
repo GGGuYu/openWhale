@@ -2,6 +2,7 @@ package com.example.openwhale.agent
 
 import com.example.openwhale.agent.provider.ModelProvider
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -22,7 +23,29 @@ class AgentSessionTest {
               toolCalls =
                 listOf(
                   AgentToolCall(id = "call-1", name = "search_destination", arguments = buildJsonObject { put("query", JsonPrimitive("静安寺")) }),
-                  AgentToolCall(id = "call-2", name = "emit_option_card", arguments = buildJsonObject { put("card_kind", JsonPrimitive("destination_candidates")) }),
+                  AgentToolCall(
+                    id = "call-2",
+                    name = "emit_option_card",
+                    arguments =
+                      buildJsonObject {
+                        put("title", JsonPrimitive("你想去哪一个？"))
+                        put("description", JsonPrimitive("先确认目的地，我再给你路线。"))
+                        put(
+                          "options",
+                          JsonArray(
+                            listOf(
+                              buildJsonObject {
+                                put("id", JsonPrimitive("jingan-temple"))
+                                put("title", JsonPrimitive("静安寺"))
+                                put("supporting_text", JsonPrimitive("静安区 · 寺庙景点，适合直接导航"))
+                                put("prompt_text", JsonPrimitive("我选 静安寺"))
+                                put("selected_destination_name", JsonPrimitive("静安寺"))
+                              },
+                            ),
+                          ),
+                        )
+                      },
+                  ),
                 ),
               finishReason = "tool_calls",
             ),
@@ -113,7 +136,15 @@ class AgentSessionTest {
               toolCalls =
                 listOf(
                   AgentToolCall(id = "call-1", name = "search_destination", arguments = buildJsonObject { put("query", JsonPrimitive("静安寺")) }),
-                  AgentToolCall(id = "call-2", name = "emit_option_card", arguments = buildJsonObject { put("card_kind", JsonPrimitive("destination_candidates")) }),
+                  AgentToolCall(
+                    id = "call-2",
+                    name = "emit_option_card",
+                    arguments =
+                      buildJsonObject {
+                        put("card_kind", JsonPrimitive("destination_candidates"))
+                        put("title", JsonPrimitive("你想去哪个点？"))
+                      },
+                  ),
                 ),
               finishReason = "tool_calls",
             ),
@@ -170,7 +201,15 @@ class AgentSessionTest {
               toolCalls =
                 listOf(
                   AgentToolCall(id = "call-1", name = "search_destination", arguments = buildJsonObject { put("query", JsonPrimitive("静安寺")) }),
-                  AgentToolCall(id = "call-2", name = "emit_option_card", arguments = buildJsonObject { put("card_kind", JsonPrimitive("destination_candidates")) }),
+                  AgentToolCall(
+                    id = "call-2",
+                    name = "emit_option_card",
+                    arguments =
+                      buildJsonObject {
+                        put("card_kind", JsonPrimitive("destination_candidates"))
+                        put("title", JsonPrimitive("你想去哪一个？"))
+                      },
+                  ),
                 ),
               finishReason = "tool_calls",
             ),
@@ -183,8 +222,69 @@ class AgentSessionTest {
                 ),
               finishReason = "tool_calls",
             ),
-            ProviderResponse(text = null, toolCalls = listOf(AgentToolCall(id = "call-5", name = "emit_option_card", arguments = buildJsonObject { put("card_kind", JsonPrimitive("hotel_price")) })), finishReason = "tool_calls"),
-            ProviderResponse(text = null, toolCalls = listOf(AgentToolCall(id = "call-6", name = "emit_option_card", arguments = buildJsonObject { put("card_kind", JsonPrimitive("hotel_distance")) })), finishReason = "tool_calls"),
+            ProviderResponse(
+              text = null,
+              toolCalls =
+                listOf(
+                  AgentToolCall(
+                    id = "call-5",
+                    name = "emit_option_card",
+                    arguments =
+                      buildJsonObject {
+                        put("title", JsonPrimitive("酒店预算想控制在多少？"))
+                        put("description", JsonPrimitive("我会按静安寺附近筛便宜酒店。"))
+                        put(
+                          "options",
+                          JsonArray(
+                            listOf(
+                              buildJsonObject {
+                                put("id", JsonPrimitive("price-300"))
+                                put("title", JsonPrimitive("¥300 以内"))
+                                put("prompt_text", JsonPrimitive("酒店预算 300 元以内"))
+                                put("max_price", JsonPrimitive(300))
+                              },
+                              buildJsonObject {
+                                put("id", JsonPrimitive("price-400"))
+                                put("title", JsonPrimitive("¥400 以内"))
+                                put("prompt_text", JsonPrimitive("酒店预算 400 元以内"))
+                                put("max_price", JsonPrimitive(400))
+                              },
+                            ),
+                          ),
+                        )
+                      },
+                  ),
+                ),
+              finishReason = "tool_calls",
+            ),
+            ProviderResponse(
+              text = null,
+              toolCalls =
+                listOf(
+                  AgentToolCall(
+                    id = "call-6",
+                    name = "emit_option_card",
+                    arguments =
+                      buildJsonObject {
+                        put("title", JsonPrimitive("离静安寺多近比较合适？"))
+                        put(
+                          "options",
+                          JsonArray(
+                            listOf(
+                              buildJsonObject {
+                                put("id", JsonPrimitive("distance-2"))
+                                put("title", JsonPrimitive("2 公里内"))
+                                put("prompt_text", JsonPrimitive("离目的地 2 公里内"))
+                                put("max_distance_km", JsonPrimitive(2))
+                              },
+                            ),
+                          ),
+                        )
+                      },
+                  ),
+                ),
+              finishReason = "tool_calls",
+            ),
             ProviderResponse(
               text = null,
               toolCalls =
@@ -278,6 +378,131 @@ class AgentSessionTest {
 
     assertEquals(1, provider.capturedUserMessages.size)
     assertTrue("price-card" in session.snapshot.value.sessionContextState.consumedCallbackCardIds)
+  }
+
+  @Test
+  fun emitOptionCard_acceptsGenericPayloadAndCarriesStructuredSelection() = runTest {
+    val registry = DemoToolFactory.create()
+    val currentState = SessionContextState()
+
+    val finalized =
+      registry.finalize(
+        registry.execute(
+          registry.prepare(
+            AgentToolCall(
+              id = "call-generic-option",
+              name = "emit_option_card",
+              arguments =
+                buildJsonObject {
+                  put("title", JsonPrimitive("酒店预算想控制在多少？"))
+                  put(
+                    "options",
+                    JsonArray(
+                      listOf(
+                        buildJsonObject {
+                          put("id", JsonPrimitive("budget-400"))
+                          put("title", JsonPrimitive("¥400 以内"))
+                          put("prompt_text", JsonPrimitive("酒店预算 400 元以内"))
+                          put("display_text", JsonPrimitive("¥400 以内"))
+                          put("max_price", JsonPrimitive(400))
+                        },
+                      ),
+                    ),
+                  )
+                },
+            ),
+          ),
+          currentState = currentState,
+        ),
+      )
+
+    val payload = finalized.result.cardPayload as OptionCardPayload
+    assertEquals("酒店预算想控制在多少？", payload.title)
+    assertEquals(400, payload.options.first().action.maxPrice)
+    assertEquals("¥400 以内", payload.options.first().action.displayText)
+    assertEquals(payload.cardId, payload.options.first().action.sourceCardId)
+  }
+
+  @Test
+  fun emitOptionCard_acceptsCallbackPromptAliasAndNestedSelection() = runTest {
+    val registry = DemoToolFactory.create()
+
+    val finalized =
+      registry.finalize(
+        registry.execute(
+          registry.prepare(
+            AgentToolCall(
+              id = "call-nested-option",
+              name = "emit_option_card",
+              arguments =
+                buildJsonObject {
+                  put("title", JsonPrimitive("你想去哪一个？"))
+                  put(
+                    "options",
+                    JsonArray(
+                      listOf(
+                        buildJsonObject {
+                          put("id", JsonPrimitive("jingan-temple"))
+                          put("title", JsonPrimitive("静安寺"))
+                          put("callback_prompt_text", JsonPrimitive("我选 静安寺"))
+                          put(
+                            "selection",
+                            buildJsonObject {
+                              put("selected_destination_name", JsonPrimitive("静安寺"))
+                            },
+                          )
+                        },
+                      ),
+                    ),
+                  )
+                },
+            ),
+          ),
+          currentState = SessionContextState(),
+        ),
+      )
+
+    val payload = finalized.result.cardPayload as OptionCardPayload
+    assertEquals("我选 静安寺", payload.options.first().action.promptText)
+    assertEquals("静安寺", payload.options.first().action.selectedDestinationName)
+    assertEquals(payload.cardId, payload.options.first().action.sourceCardId)
+  }
+
+  @Test
+  fun optionCardValidator_rejectsDuplicateOptionIds() {
+    val invalidCard =
+      OptionCardPayload(
+        cardId = "duplicate-card",
+        title = "请选择",
+        options =
+          listOf(
+            OptionCardChoice(id = "same", title = "A", action = SelectionAction(promptText = "选 A", displayText = "A")),
+            OptionCardChoice(id = "same", title = "B", action = SelectionAction(promptText = "选 B", displayText = "B")),
+          ),
+      )
+
+    assertEquals(null, AgentCardValidator.validate(invalidCard))
+  }
+
+  @Test
+  fun optionCardValidator_rejectsMismatchedSourceCardId() {
+    val invalidCard =
+      OptionCardPayload(
+        cardId = "option-card-1",
+        title = "请选择",
+        options =
+          listOf(
+            OptionCardChoice(
+              id = "destination-a",
+              title = "静安寺",
+              action = SelectionAction(promptText = "我选 静安寺", displayText = "静安寺", sourceCardId = "another-card"),
+            ),
+          ),
+        allowCustomInput = true,
+        customInputHint = "也可以继续输入",
+      )
+
+    assertEquals(null, AgentCardValidator.validate(invalidCard))
   }
 
   @Test

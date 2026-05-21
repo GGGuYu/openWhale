@@ -4,46 +4,63 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryScrollableTabRow
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -59,7 +76,6 @@ import com.example.openwhale.agent.AgentCardPayload
 import com.example.openwhale.agent.AgentSessionSnapshot
 import com.example.openwhale.agent.DebugEvent
 import com.example.openwhale.agent.DebugEventLevel
-import com.example.openwhale.agent.ExternalLinkAction
 import com.example.openwhale.agent.HotelCardItem
 import com.example.openwhale.agent.HotelFilterContext
 import com.example.openwhale.agent.HotelListCardPayload
@@ -119,57 +135,65 @@ internal fun MainScreen(
   onApiKeySave: (String) -> Unit = {},
 ) {
   val context = LocalContext.current
+  val density = LocalDensity.current
+  var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
+  var showHistorySheet by rememberSaveable { mutableStateOf(false) }
+  var debugExpanded by rememberSaveable { mutableStateOf(false) }
+  var apiKeyInput by rememberSaveable { mutableStateOf("") }
+  var composerHeightPx by remember { mutableIntStateOf(0) }
+  val composerHeightDp = with(density) { composerHeightPx.toDp() }
+  val recentConversations = remember(uiState.timeline, uiState.selectedWorkflowPackId, uiState.sessionContextState) { buildRecentConversationItems(uiState) }
 
-  Scaffold(
-    modifier = modifier.fillMaxSize(),
-    containerColor = MaterialTheme.colorScheme.background,
-    bottomBar = {
-      Surface(shadowElevation = 12.dp, color = MaterialTheme.colorScheme.surface) {
-        Column(
-          modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
-          verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-          OutlinedTextField(
-            value = inputText,
-            onValueChange = onInputChange,
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 2,
-            shape = RoundedCornerShape(20.dp),
-            label = { Text("输入消息") },
-            placeholder = { Text("例如：导航到静安寺") },
-          )
-          Button(
-            onClick = onSendClick,
-            enabled = inputText.isNotBlank() && !uiState.isSending,
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(18.dp),
-          ) {
-            if (uiState.isSending) {
-              CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
-              Spacer(modifier = Modifier.width(10.dp))
-              Text("处理中")
-            } else {
-              Text("发送")
-            }
-          }
-        }
-      }
-    },
-  ) { innerPadding ->
+  if (showSettingsSheet) {
+    SettingsSheet(
+      uiState = uiState,
+      apiKeyInput = apiKeyInput,
+      onApiKeyInputChange = { apiKeyInput = it },
+      onSaveClick = {
+        onApiKeySave(apiKeyInput)
+        apiKeyInput = ""
+      },
+      onResetClick = {
+        onApiKeySave("")
+        apiKeyInput = ""
+      },
+      debugExpanded = debugExpanded,
+      onDebugExpandedChange = { debugExpanded = it },
+      onDismissRequest = { showSettingsSheet = false },
+    )
+  }
+
+  if (showHistorySheet) {
+    HistorySheet(items = recentConversations, onDismissRequest = { showHistorySheet = false })
+  }
+
+  Box(
+    modifier =
+      modifier
+        .fillMaxSize()
+        .background(MaterialTheme.colorScheme.background)
+        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+  ) {
     LazyColumn(
       modifier = Modifier.fillMaxSize(),
       contentPadding =
         PaddingValues(
           start = 16.dp,
           end = 16.dp,
-          top = contentPadding + innerPadding.calculateTopPadding() + 12.dp,
-          bottom = innerPadding.calculateBottomPadding() + 20.dp,
+          top = contentPadding + 12.dp,
+          bottom = composerHeightDp + 12.dp,
         ),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       item {
-        HeaderCard(uiState = uiState, onWorkflowPackSelected = onWorkflowPackSelected, onApiKeySave = onApiKeySave)
+        ChatTopShell(
+          uiState = uiState,
+          onWorkflowPackSelected = onWorkflowPackSelected,
+          onShowSettings = { showSettingsSheet = true },
+          onShowHistory = { showHistorySheet = true },
+        )
       }
+
       items(uiState.timeline, key = TimelineItem::id) { item ->
         TimelineBubble(
           item = item,
@@ -179,57 +203,303 @@ internal fun MainScreen(
         )
       }
     }
+
+    Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+      ComposerBar(
+        inputText = inputText,
+        uiState = uiState,
+        onInputChange = onInputChange,
+        onSendClick = onSendClick,
+        onMeasured = { composerHeightPx = it },
+      )
+    }
   }
 }
 
 @Composable
-private fun HeaderCard(uiState: AgentSessionSnapshot, onWorkflowPackSelected: (String) -> Unit, onApiKeySave: (String) -> Unit) {
-  var debugExpanded by remember { mutableStateOf(true) }
-  var apiKeyInput by remember { mutableStateOf("") }
-  Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(24.dp)) {
-    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-      Text("OpenWhale Mobile Agent Demo", style = MaterialTheme.typography.headlineMedium, color = WhaleInk)
-      Text(
-        "导航、歧义确认、预算筛选、酒店列表和平台跳转已经接通。当前面板也会显示最近的 runtime 调试事件。",
-        style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-      StatusPills(uiState = uiState)
-      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("切换工作流", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
+private fun ChatTopShell(
+  uiState: AgentSessionSnapshot,
+  onWorkflowPackSelected: (String) -> Unit,
+  onShowSettings: () -> Unit,
+  onShowHistory: () -> Unit,
+) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = RoundedCornerShape(30.dp),
+    tonalElevation = 1.dp,
+  ) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text("OpenWhale", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
+          Text(
+            "${uiState.providerLabel} · ${uiState.modelLabel}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          uiState.availableWorkflowPacks.forEach { pack ->
-            AssistChip(
-              onClick = { onWorkflowPackSelected(pack.id) },
-              label = { Text(pack.title) },
-              leadingIcon = {
-                Box(modifier = Modifier.size(10.dp).background(if (pack.id == uiState.selectedWorkflowPackId) WhaleAccent else WhaleAccentSoft, CircleShape))
-              },
-            )
-          }
+          AssistChip(
+            onClick = onShowHistory,
+            label = { Text("历史") },
+            modifier = Modifier.semantics { contentDescription = "打开最近对话" },
+          )
+          AssistChip(
+            onClick = onShowSettings,
+            label = { Text("设置") },
+            modifier = Modifier.semantics { contentDescription = "打开设置" },
+          )
         }
       }
-      ContextSummary(uiState = uiState)
+
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusPill(text = "当前模型", containerColor = WhaleSurface, contentColor = WhaleInk)
+        StatusPill(
+          text = if (uiState.apiKeyConfigured) "Key 已就绪" else "Key 待配置",
+          containerColor = if (uiState.apiKeyConfigured) MaterialTheme.colorScheme.secondaryContainer else WhaleSurface,
+          contentColor = if (uiState.apiKeyConfigured) MaterialTheme.colorScheme.onSecondaryContainer else WhaleInk,
+        )
+      }
+
+      CompactWorkflowSelector(
+        availableWorkflowPacks = uiState.availableWorkflowPacks,
+        selectedWorkflowPackId = uiState.selectedWorkflowPackId,
+        onWorkflowPackSelected = onWorkflowPackSelected,
+      )
+
+      SessionContextSummary(uiState = uiState)
+    }
+  }
+}
+
+@Composable
+private fun CompactWorkflowSelector(
+  availableWorkflowPacks: List<WorkflowPromptPack>,
+  selectedWorkflowPackId: String,
+  onWorkflowPackSelected: (String) -> Unit,
+) {
+  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text("工作流", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(
+      modifier = Modifier.horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      availableWorkflowPacks.forEach { pack ->
+        AssistChip(
+          onClick = { onWorkflowPackSelected(pack.id) },
+          label = { Text(pack.title) },
+          leadingIcon = {
+            Box(
+              modifier =
+                Modifier
+                  .size(10.dp)
+                  .background(if (pack.id == selectedWorkflowPackId) WhaleAccent else WhaleAccentSoft, CircleShape),
+            )
+          },
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun SessionContextSummary(uiState: AgentSessionSnapshot) {
+  val hasContext =
+    uiState.sessionContextState.selectedDestination != null ||
+      uiState.sessionContextState.hotelFilterContext.maxPrice != null ||
+      uiState.sessionContextState.hotelFilterContext.maxDistanceKm != null ||
+      uiState.errorMessage != null
+  if (!hasContext) {
+    return
+  }
+
+  val destination = uiState.sessionContextState.selectedDestination?.name ?: "未选择"
+  val price = uiState.sessionContextState.hotelFilterContext.maxPrice?.let { "≤¥$it" } ?: "未设置"
+  val distance = uiState.sessionContextState.hotelFilterContext.maxDistanceKm?.let { "≤${it}km" } ?: "未设置"
+
+  Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(22.dp)) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      Text("当前会话", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+      Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        StatusPill(text = destination, containerColor = WhaleSurface, contentColor = WhaleInk)
+        StatusPill(text = price, containerColor = WhaleSurface, contentColor = WhaleInk)
+        StatusPill(text = distance, containerColor = WhaleSurface, contentColor = WhaleInk)
+      }
+      uiState.errorMessage?.let { errorMessage ->
+        Text(
+          errorMessage,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.error,
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun ComposerBar(
+  inputText: String,
+  uiState: AgentSessionSnapshot,
+  onInputChange: (String) -> Unit,
+  onSendClick: () -> Unit,
+  onMeasured: (Int) -> Unit = {},
+) {
+  Surface(
+    modifier =
+      Modifier
+        .fillMaxWidth()
+        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+        .onSizeChanged { onMeasured(it.height) },
+    color = MaterialTheme.colorScheme.surface,
+    shadowElevation = 10.dp,
+    tonalElevation = 1.dp,
+    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 12.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.Bottom,
+    ) {
+      OutlinedTextField(
+        value = inputText,
+        onValueChange = onInputChange,
+        modifier = Modifier.weight(1f),
+        minLines = 1,
+        maxLines = 4,
+        shape = RoundedCornerShape(22.dp),
+        label = { Text("消息") },
+        placeholder = { Text("例如：导航到静安寺") },
+      )
+      Button(
+        onClick = onSendClick,
+        enabled = inputText.isNotBlank() && !uiState.isSending,
+        modifier = Modifier.height(52.dp).widthIn(min = 88.dp),
+        shape = RoundedCornerShape(18.dp),
+      ) {
+        if (uiState.isSending) {
+          CircularProgressIndicator(
+            modifier = Modifier.size(18.dp),
+            strokeWidth = 2.dp,
+            color = MaterialTheme.colorScheme.onPrimary,
+          )
+          Spacer(modifier = Modifier.width(10.dp))
+          Text("处理中", maxLines = 1)
+        } else {
+          Text("发送")
+        }
+      }
+    }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsSheet(
+  uiState: AgentSessionSnapshot,
+  apiKeyInput: String,
+  onApiKeyInputChange: (String) -> Unit,
+  onSaveClick: () -> Unit,
+  onResetClick: () -> Unit,
+  debugExpanded: Boolean,
+  onDebugExpandedChange: (Boolean) -> Unit,
+  onDismissRequest: () -> Unit,
+) {
+  ModalBottomSheet(onDismissRequest = onDismissRequest) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+      Text("设置", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
+      Text(
+        "把运行时配置和调试能力下沉到次级入口，聊天主界面只保留必要的产品壳层。",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
       ApiKeyPanel(
         uiState = uiState,
         apiKeyInput = apiKeyInput,
-        onApiKeyInputChange = { apiKeyInput = it },
-        onSaveClick = {
-          onApiKeySave(apiKeyInput)
-          apiKeyInput = ""
-        },
-        onResetClick = {
-          onApiKeySave("")
-          apiKeyInput = ""
-        },
+        onApiKeyInputChange = onApiKeyInputChange,
+        onSaveClick = onSaveClick,
+        onResetClick = onResetClick,
       )
-      AssistChip(
-        onClick = { debugExpanded = !debugExpanded },
-        label = { Text(if (debugExpanded) "收起调试面板" else "展开调试面板") },
-      )
-      if (debugExpanded) {
-        DebugPanel(events = uiState.debugEvents)
+      Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text("调试信息", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
+              Text("默认折叠，只在需要排查时查看。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            AssistChip(
+              onClick = { onDebugExpandedChange(!debugExpanded) },
+              label = { Text(if (debugExpanded) "收起" else "展开") },
+            )
+          }
+          if (debugExpanded) {
+            DebugPanel(events = uiState.debugEvents)
+          }
+        }
       }
+      Spacer(modifier = Modifier.height(8.dp))
+    }
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistorySheet(items: List<RecentConversationPreview>, onDismissRequest: () -> Unit) {
+  ModalBottomSheet(onDismissRequest = onDismissRequest) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Text("最近对话", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
+      Text(
+        "当前先展示本地最近会话摘要与占位数据，为后续真正的历史持久化预留入口。",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
+      if (items.isEmpty()) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
+          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("还没有可展示的最近对话", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
+            Text("先发一条消息，后续这里会聚合最近会话摘要。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          }
+        }
+      } else {
+        items.forEachIndexed { index, item ->
+          Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth(),
+          ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text(item.title, style = MaterialTheme.typography.titleMedium, color = WhaleInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
+              Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+          }
+          if (index != items.lastIndex) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+          }
+        }
+      }
+      Spacer(modifier = Modifier.height(8.dp))
     }
   }
 }
@@ -244,11 +514,15 @@ private fun ApiKeyPanel(
 ) {
   Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
     Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+      ) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
           Text("DeepSeek Key", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
           Text(
-            "直接在应用里保存本地密钥，真机调试时不需要重新打包。",
+            "直接在应用内保存本地覆写，真机调试时不需要重新打包。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
@@ -277,15 +551,15 @@ private fun ApiKeyPanel(
         placeholder = { Text("粘贴 sk-...，仅保存在本机") },
         visualTransformation = PasswordVisualTransformation(),
       )
-      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
         TextButton(onClick = onResetClick, enabled = uiState.hasLocalApiKeyOverride) {
           Text("恢复构建配置")
         }
-        Button(
-          onClick = onSaveClick,
-          enabled = apiKeyInput.isNotBlank(),
-          shape = RoundedCornerShape(16.dp),
-        ) {
+        Button(onClick = onSaveClick, enabled = apiKeyInput.isNotBlank(), shape = RoundedCornerShape(16.dp)) {
           Text("保存本地 Key")
         }
       }
@@ -294,44 +568,9 @@ private fun ApiKeyPanel(
 }
 
 @Composable
-private fun StatusPills(uiState: AgentSessionSnapshot) {
-  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-    Surface(color = WhaleAccentSoft, shape = RoundedCornerShape(999.dp)) {
-      Text(
-        "${uiState.providerLabel} / ${uiState.modelLabel}",
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        color = WhaleAccent,
-        fontWeight = FontWeight.Medium,
-      )
-    }
-    Surface(color = WhaleSurface, shape = RoundedCornerShape(999.dp)) {
-      Text("卡片回调已启用", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = WhaleInk, fontWeight = FontWeight.Medium)
-    }
-    uiState.errorMessage?.let {
-      Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(999.dp)) {
-        Text("最近有错误", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
-      }
-    }
-  }
-}
-
-@Composable
-private fun ContextSummary(uiState: AgentSessionSnapshot) {
-  val destination = uiState.sessionContextState.selectedDestination?.name ?: "未选择"
-  val price = uiState.sessionContextState.hotelFilterContext.maxPrice?.let { "≤¥$it" } ?: "未设置"
-  val distance = uiState.sessionContextState.hotelFilterContext.maxDistanceKm?.let { "≤${it}km" } ?: "未设置"
-  Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-    Text("会话状态", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-    Text("目的地：$destination", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Text("酒店预算：$price，距离：$distance", color = MaterialTheme.colorScheme.onSurfaceVariant)
-  }
-}
-
-@Composable
 private fun DebugPanel(events: List<DebugEvent>) {
-  Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
+  Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(18.dp)) {
     Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Text("最近调试事件", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
       val recentEvents = events.takeLast(8).asReversed()
       if (recentEvents.isEmpty()) {
         Text("当前还没有调试事件。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -357,31 +596,46 @@ private fun TimelineBubble(
   onSelectionSubmit: (SelectionAction) -> Unit,
   onOpenLink: (String) -> Unit,
 ) {
-  if (item.role == TimelineItemRole.Tool) {
-    ToolExecutionCard(item = item)
-    return
+  when (item.role) {
+    TimelineItemRole.Tool -> {
+      ToolExecutionCard(item = item)
+      return
+    }
+    TimelineItemRole.Status -> {
+      StatusEventCard(item = item)
+      return
+    }
+    else -> Unit
   }
 
-  val alignment = if (item.role == TimelineItemRole.User) Alignment.CenterEnd else Alignment.CenterStart
-  val backgroundColor =
-    when (item.role) {
-      TimelineItemRole.User -> WhaleAccent
-      TimelineItemRole.Assistant -> MaterialTheme.colorScheme.surface
-      TimelineItemRole.Tool -> WhaleAccentSoft
-      TimelineItemRole.Status -> WhaleSurface
-    }
-  val contentColor = if (item.role == TimelineItemRole.User) Color.White else WhaleInk
+  val isUser = item.role == TimelineItemRole.User
+  val backgroundColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
+  val contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else WhaleInk
+  val avatarEmoji = if (isUser) "🙂" else "🐋"
+  val avatarLabel = if (isUser) "用户头像" else "助手头像"
 
-  Box(modifier = Modifier.fillMaxWidth(), contentAlignment = alignment) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    verticalAlignment = Alignment.Bottom,
+  ) {
+    if (!isUser) {
+      AvatarMarker(emoji = avatarEmoji, label = avatarLabel)
+      Spacer(modifier = Modifier.width(10.dp))
+    }
     Card(
       shape = RoundedCornerShape(24.dp),
       colors = CardDefaults.cardColors(containerColor = backgroundColor),
-      modifier = Modifier.fillMaxWidth(if (item.role == TimelineItemRole.Status) 1f else 0.94f),
+      modifier = Modifier.widthIn(max = 340.dp).fillMaxWidth(0.88f),
     ) {
       Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(item.title, color = contentColor.copy(alpha = 0.75f), style = MaterialTheme.typography.titleMedium)
+        Text(
+          item.title,
+          color = contentColor.copy(alpha = 0.72f),
+          style = MaterialTheme.typography.labelMedium,
+        )
         if (item.text.isNotBlank()) {
-          if (item.role == TimelineItemRole.Assistant || item.role == TimelineItemRole.Status) {
+          if (!isUser) {
             MarkdownText(markdown = item.text, color = contentColor)
           } else {
             Text(item.text, color = contentColor, style = MaterialTheme.typography.bodyLarge)
@@ -396,6 +650,37 @@ private fun TimelineBubble(
           )
         }
       }
+    }
+    if (isUser) {
+      Spacer(modifier = Modifier.width(10.dp))
+      AvatarMarker(emoji = avatarEmoji, label = avatarLabel)
+    }
+  }
+}
+
+@Composable
+private fun AvatarMarker(emoji: String, label: String) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = CircleShape,
+    modifier = Modifier.size(36.dp).semantics { contentDescription = label },
+  ) {
+    Box(contentAlignment = Alignment.Center) {
+      Text(emoji, style = MaterialTheme.typography.titleMedium)
+    }
+  }
+}
+
+@Composable
+private fun StatusEventCard(item: TimelineItem) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = RoundedCornerShape(18.dp),
+    modifier = Modifier.fillMaxWidth(),
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text(item.title, style = MaterialTheme.typography.labelLarge, color = WhaleInk)
+      Text(item.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
   }
 }
@@ -420,7 +705,9 @@ private fun OptionCard(payload: OptionCardPayload, consumedCallbackCardIds: Set<
   Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
     Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       Text(payload.title, style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-      payload.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+      payload.description?.let {
+        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+      }
       payload.options.forEach { option ->
         OutlinedButton(
           onClick = { onSelectionSubmit(option.action) },
@@ -557,19 +844,15 @@ private fun PlatformQuoteRow(quote: HotelPlatformQuote, onOpenLink: (String) -> 
 
 @Composable
 private fun ToolExecutionCard(item: TimelineItem) {
-  Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-    Surface(
-      color = WhaleAccentSoft,
-      shape = RoundedCornerShape(20.dp),
-      modifier = Modifier.fillMaxWidth(0.88f),
-    ) {
-      Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(color = WhaleSurface, shape = RoundedCornerShape(999.dp)) {
-          Text("工具执行反馈", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = WhaleInk, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
-        }
-        Text(item.title, color = WhaleInk, style = MaterialTheme.typography.titleMedium)
-        Text(item.text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-      }
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.92f),
+    shape = RoundedCornerShape(16.dp),
+    modifier = Modifier.widthIn(max = 288.dp),
+  ) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text("工具反馈", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+      Text(item.title, color = WhaleInk, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+      Text(item.text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
     }
   }
 }
@@ -594,6 +877,37 @@ private fun MarkdownText(markdown: String, color: Color) {
   Text(markdown.toAnnotatedString(), color = color, style = MaterialTheme.typography.bodyLarge)
 }
 
+@Composable
+private fun StatusPill(text: String, containerColor: Color, contentColor: Color) {
+  Surface(color = containerColor, shape = RoundedCornerShape(999.dp)) {
+    Text(
+      text,
+      modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+      color = contentColor,
+      style = MaterialTheme.typography.labelMedium,
+      fontWeight = FontWeight.Medium,
+    )
+  }
+}
+
+private fun buildRecentConversationItems(uiState: AgentSessionSnapshot): List<RecentConversationPreview> {
+  val workflowTitle = uiState.availableWorkflowPacks.firstOrNull { it.id == uiState.selectedWorkflowPackId }?.title ?: "当前工作流"
+  return uiState.timeline
+    .filter { it.role == TimelineItemRole.User }
+    .takeLast(6)
+    .asReversed()
+    .mapIndexed { index, item ->
+      RecentConversationPreview(
+        title = item.text,
+        subtitle = buildString {
+          append(workflowTitle)
+          append(" · 最近片段 #")
+          append(index + 1)
+        },
+      )
+    }
+}
+
 private fun openExternalLink(context: android.content.Context, uri: String) {
   runCatching {
     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -606,7 +920,6 @@ private fun openExternalLink(context: android.content.Context, uri: String) {
   }
 }
 
-@Composable
 private fun DebugEventLevel.label(): String =
   when (this) {
     DebugEventLevel.Info -> "INFO"
@@ -614,12 +927,11 @@ private fun DebugEventLevel.label(): String =
     DebugEventLevel.Error -> "ERROR"
   }
 
-@Composable
 private fun DebugEventLevel.dotColor(): Color =
   when (this) {
     DebugEventLevel.Info -> WhaleAccent
     DebugEventLevel.Warning -> Color(0xFFD68C16)
-    DebugEventLevel.Error -> MaterialTheme.colorScheme.error
+    DebugEventLevel.Error -> Color(0xFFC84A4A)
   }
 
 private fun String.toAnnotatedString(): AnnotatedString {
@@ -648,6 +960,11 @@ private fun String.toAnnotatedString(): AnnotatedString {
     }
   }
 }
+
+private data class RecentConversationPreview(
+  val title: String,
+  val subtitle: String,
+)
 
 @Preview(showBackground = true, widthDp = 412, heightDp = 917)
 @Composable
@@ -680,6 +997,8 @@ private fun MainScreenPreview() {
                           action = SelectionAction(promptText = "我选 静安寺", selectedDestinationName = "静安寺"),
                         ),
                       ),
+                    allowCustomInput = true,
+                    customInputHint = "也可以继续说一个新的地点",
                   ),
               ),
             ),

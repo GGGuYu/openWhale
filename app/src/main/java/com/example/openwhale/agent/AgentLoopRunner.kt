@@ -15,14 +15,18 @@ class AgentLoopRunner(
     workflowPromptPack: WorkflowPromptPack,
     conversationHistory: List<ProviderConversationMessage>,
     currentState: SessionContextState,
+    onPlaybackEvent: suspend (AgentPlaybackEvent) -> Unit = {},
   ): AgentLoopResult {
     var sessionState = currentState
     val workingConversationHistory = conversationHistory.toMutableList()
     val generatedTimelineItems = mutableListOf<TimelineItem>()
+    val turnId = UUID.randomUUID().toString()
+    val visibleThinkingText = StringBuilder()
 
     repeat(maxIterations) {
       debugLogger.log(category = "loop", message = "开始第 ${it + 1} 轮，当前已选目的地=${sessionState.selectedDestination?.name ?: "无"}")
       val systemPrompt = workflowPromptPack.systemPrompt + "\n\n当前会话状态：\n" + sessionState.toPromptState()
+      val streamedAssistantText = StringBuilder()
       val response =
         modelProvider.complete(
           ProviderRequest(
@@ -31,7 +35,39 @@ class AgentLoopRunner(
             messages = workingConversationHistory.toList(),
             tools = toolRegistry.definitions(),
           ),
+          onStreamEvent = { streamEvent ->
+            when (streamEvent) {
+              is ProviderStreamEvent.TextDelta -> {
+                if (streamEvent.delta.isNotEmpty()) {
+                  streamedAssistantText.append(streamEvent.delta)
+                  onPlaybackEvent(
+                    AgentPlaybackEvent.AssistantUpdate(
+                      turnId = turnId,
+                      text = streamedAssistantText.toString(),
+                      done = false,
+                    ),
+                  )
+                }
+              }
+
+              is ProviderStreamEvent.ThinkingDelta -> {
+                if (streamEvent.delta.isNotEmpty()) {
+                  visibleThinkingText.append(streamEvent.delta)
+                  onPlaybackEvent(
+                    AgentPlaybackEvent.ThinkingUpdate(
+                      turnId = turnId,
+                      text = visibleThinkingText.toString(),
+                      done = false,
+                    ),
+                  )
+                }
+              }
+            }
+          },
         )
+
+      syncVisibleBuffer(target = visibleThinkingText, fullText = response.reasoningContent)
+      syncVisibleBuffer(target = streamedAssistantText, fullText = response.text)
 
       debugLogger.log(
         category = "loop",
@@ -41,21 +77,57 @@ class AgentLoopRunner(
       val assistantMessage = response.toConversationMessage()
       if (response.toolCalls.isEmpty()) {
         assistantMessage?.let(workingConversationHistory::add)
-        createAssistantTimelineItem(text = response.text, cardPayload = compatibilityFallbackCard(workflowPromptPack, response.text, sessionState, emptyList()))?.let {
-          generatedTimelineItems += it
+        val assistantCard = compatibilityFallbackCard(workflowPromptPack, response.text, sessionState, emptyList())
+        assistantCard?.let { card ->
+          if (streamedAssistantText.isEmpty()) {
+            streamedAssistantText.append(DemoCardPlanner.fallbackText(card))
+          }
         }
+        if (visibleThinkingText.isNotEmpty()) {
+          onPlaybackEvent(
+            AgentPlaybackEvent.ThinkingUpdate(
+              turnId = turnId,
+              text = visibleThinkingText.toString(),
+              done = true,
+            ),
+          )
+        }
+        onPlaybackEvent(
+          AgentPlaybackEvent.AssistantUpdate(
+            turnId = turnId,
+            text = streamedAssistantText.toString(),
+            cardPayload = assistantCard,
+            done = true,
+          ),
+        )
         debugLogger.log(category = "loop", message = "本轮无工具调用，结束 agent loop")
         return AgentLoopResult(updatedState = sessionState, updatedConversationHistory = workingConversationHistory.toList(), timelineItems = generatedTimelineItems)
       }
 
+      if (streamedAssistantText.isNotBlank()) {
+        onPlaybackEvent(
+          AgentPlaybackEvent.AssistantUpdate(
+            turnId = turnId,
+            text = streamedAssistantText.toString(),
+            done = true,
+          ),
+        )
+      }
+      onPlaybackEvent(AgentPlaybackEvent.AssistantBoundary(turnId = turnId))
+
       val preparedToolCalls = prepareToolBatch(response.toolCalls)
-      val batchResult = executeToolBatch(preparedToolCalls = preparedToolCalls, initialState = sessionState)
+      val batchResult =
+        executeToolBatch(
+          preparedToolCalls = preparedToolCalls,
+          initialState = sessionState,
+          turnId = turnId,
+          onPlaybackEvent = onPlaybackEvent,
+        )
       sessionState = batchResult.updatedState
 
       assistantMessage?.let(workingConversationHistory::add)
       batchResult.finalizedToolCalls.forEach { finalizedToolCall ->
         workingConversationHistory += finalizedToolCall.toolMessage
-        generatedTimelineItems += finalizedToolCall.toolFeedbackItem
       }
 
       val assistantCard =
@@ -68,15 +140,42 @@ class AgentLoopRunner(
             state = sessionState,
             executedToolNames = batchResult.finalizedToolCalls.map { it.preparedCall.toolCall.name },
           )
-      createAssistantTimelineItem(text = response.text, cardPayload = assistantCard)?.let { generatedTimelineItems += it }
 
       if (batchResult.finalizedToolCalls.any(FinalizedToolCall::isCardEmission)) {
+        assistantCard?.let { card ->
+          onPlaybackEvent(
+            AgentPlaybackEvent.AssistantUpdate(
+              turnId = turnId,
+              text = if (streamedAssistantText.isBlank()) DemoCardPlanner.fallbackText(card) else "",
+              cardPayload = card,
+              done = true,
+            ),
+          )
+        }
+        if (visibleThinkingText.isNotEmpty()) {
+          onPlaybackEvent(
+            AgentPlaybackEvent.ThinkingUpdate(
+              turnId = turnId,
+              text = visibleThinkingText.toString(),
+              done = true,
+            ),
+          )
+        }
         debugLogger.log(category = "loop", message = "本轮已显式发出卡片，结束当前 loop，等待下一次用户输入")
         return AgentLoopResult(updatedState = sessionState, updatedConversationHistory = workingConversationHistory.toList(), timelineItems = generatedTimelineItems)
       }
     }
 
     debugLogger.log(category = "loop", message = "达到最大轮次 $maxIterations，停止继续调用", level = DebugEventLevel.Warning)
+    if (visibleThinkingText.isNotEmpty()) {
+      onPlaybackEvent(
+        AgentPlaybackEvent.ThinkingUpdate(
+          turnId = turnId,
+          text = visibleThinkingText.toString(),
+          done = true,
+        ),
+      )
+    }
     generatedTimelineItems += TimelineItem(id = UUID.randomUUID().toString(), role = TimelineItemRole.Status, title = "状态", text = "Agent loop 达到最大轮次，已停止继续调用。")
     return AgentLoopResult(updatedState = sessionState, updatedConversationHistory = workingConversationHistory.toList(), timelineItems = generatedTimelineItems)
   }
@@ -90,6 +189,8 @@ class AgentLoopRunner(
   private suspend fun executeToolBatch(
     preparedToolCalls: List<PreparedToolCall>,
     initialState: SessionContextState,
+    turnId: String,
+    onPlaybackEvent: suspend (AgentPlaybackEvent) -> Unit,
   ): ToolBatchExecutionResult {
     var nextState = initialState
     val finalizedToolCalls = mutableListOf<FinalizedToolCall>()
@@ -97,7 +198,14 @@ class AgentLoopRunner(
       debugLogger.log(category = "loop", message = "进入工具阶段：${preparedToolCall.toolCall.name}")
       val executedToolCall = toolRegistry.execute(preparedToolCall = preparedToolCall, currentState = nextState)
       nextState = executedToolCall.result.nextState
-      finalizedToolCalls += toolRegistry.finalize(executedToolCall)
+      val finalizedToolCall = toolRegistry.finalize(executedToolCall)
+      finalizedToolCalls += finalizedToolCall
+      onPlaybackEvent(
+        AgentPlaybackEvent.ToolFeedback(
+          turnId = turnId,
+          item = finalizedToolCall.toolFeedbackItem.copy(turnId = turnId),
+        ),
+      )
     }
     return ToolBatchExecutionResult(updatedState = nextState, finalizedToolCalls = finalizedToolCalls)
   }
@@ -143,22 +251,21 @@ class AgentLoopRunner(
       ),
     )
   }
+}
 
-  private fun createAssistantTimelineItem(
-    text: String?,
-    cardPayload: AgentCardPayload?,
-  ): TimelineItem? {
-    val validatedCardPayload = AgentCardValidator.validate(cardPayload)
-    if (text.isNullOrBlank() && validatedCardPayload == null) {
-      return null
+private fun syncVisibleBuffer(target: StringBuilder, fullText: String?) {
+  val normalized = fullText?.trim().orEmpty()
+  if (normalized.isEmpty()) {
+    return
+  }
+  val current = target.toString()
+  when {
+    current.isEmpty() -> target.append(normalized)
+    normalized.startsWith(current) -> target.append(normalized.removePrefix(current))
+    current != normalized -> {
+      target.clear()
+      target.append(normalized)
     }
-    return TimelineItem(
-      id = UUID.randomUUID().toString(),
-      role = TimelineItemRole.Assistant,
-      title = "助手",
-      text = text ?: DemoCardPlanner.fallbackText(requireNotNull(validatedCardPayload)),
-      cardPayload = validatedCardPayload,
-    )
   }
 }
 
@@ -174,10 +281,15 @@ private data class ToolBatchExecutionResult(
 )
 
 private fun ProviderResponse.toConversationMessage(): ProviderConversationMessage? {
-  if (text.isNullOrBlank() && toolCalls.isEmpty()) {
+  if (text.isNullOrBlank() && reasoningContent.isNullOrBlank() && toolCalls.isEmpty()) {
     return null
   }
-  return ProviderConversationMessage(role = ProviderMessageRole.Assistant, content = text, toolCalls = toolCalls)
+  return ProviderConversationMessage(
+    role = ProviderMessageRole.Assistant,
+    content = text,
+    reasoningContent = reasoningContent,
+    toolCalls = toolCalls,
+  )
 }
 
 private fun SessionContextState.toPromptState(): String {

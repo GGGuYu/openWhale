@@ -3,11 +3,14 @@ package com.example.openwhale.ui.main
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,16 +29,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -47,11 +54,13 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -94,6 +103,7 @@ import com.example.openwhale.theme.WhaleAccent
 import com.example.openwhale.theme.WhaleAccentSoft
 import com.example.openwhale.theme.WhaleInk
 import com.example.openwhale.theme.WhaleSurface
+import androidx.compose.runtime.withFrameNanos
 
 @Composable
 fun MainScreen(
@@ -119,6 +129,7 @@ fun MainScreen(
     onWorkflowPackSelected = resolvedViewModel::selectWorkflowPack,
     onSelectionSubmit = resolvedViewModel::submitSelection,
     onApiKeySave = resolvedViewModel::updateApiKey,
+    onModelSelected = resolvedViewModel::updateModelId,
   )
 }
 
@@ -128,14 +139,17 @@ internal fun MainScreen(
   modifier: Modifier = Modifier,
   contentPadding: Dp = 0.dp,
   inputText: String = "",
+  listState: LazyListState = rememberLazyListState(),
   onInputChange: (String) -> Unit = {},
   onSendClick: () -> Unit = {},
   onWorkflowPackSelected: (String) -> Unit = {},
   onSelectionSubmit: (SelectionAction) -> Unit = {},
   onApiKeySave: (String) -> Unit = {},
+  onModelSelected: (String) -> Unit = {},
 ) {
   val context = LocalContext.current
   val density = LocalDensity.current
+  val bottomPinThresholdPx = with(density) { 96.dp.roundToPx() }
   var showSettingsSheet by rememberSaveable { mutableStateOf(false) }
   var showHistorySheet by rememberSaveable { mutableStateOf(false) }
   var debugExpanded by rememberSaveable { mutableStateOf(false) }
@@ -143,6 +157,43 @@ internal fun MainScreen(
   var composerHeightPx by remember { mutableIntStateOf(0) }
   val composerHeightDp = with(density) { composerHeightPx.toDp() }
   val recentConversations = remember(uiState.timeline, uiState.selectedWorkflowPackId, uiState.sessionContextState) { buildRecentConversationItems(uiState) }
+
+  // Tail-content change key: recomputes whenever the latest item's identity or visible
+  // content changes (new item added, text grows, card payload changes, streaming flag toggles).
+  val tailChangeKey = remember(uiState.timeline.lastOrNull(), uiState.timeline.size) {
+    val last = uiState.timeline.lastOrNull()
+    buildString {
+      append(uiState.timeline.size)
+      append(':')
+      append(last?.id.orEmpty())
+      append(':')
+      append(last?.cardPayload?.type.orEmpty())
+      append(':')
+      append(last?.isStreaming.toString())
+      append(':')
+      append(last?.text?.length ?: 0)
+    }
+  }
+
+  // Auto-follow: whenever tail content changes, check if the user is within the
+  // bottom threshold. If yes, animate to the latest item. One-frame delay ensures
+  // LazyColumn has laid out the new content before we measure distance.
+  LaunchedEffect(tailChangeKey) {
+    if (uiState.timeline.isNotEmpty()) {
+      withFrameNanos { }
+      if (listState.isNearBottom(bottomPinThresholdPx)) {
+        listState.animateScrollToItem(uiState.timeline.size)
+      }
+    }
+  }
+
+  // When the user actively sends a message, always scroll to it regardless of pin state.
+  LaunchedEffect(uiState.timeline.size) {
+    val last = uiState.timeline.lastOrNull()
+    if (last?.role == TimelineItemRole.User && uiState.timeline.isNotEmpty()) {
+      listState.animateScrollToItem(uiState.timeline.size)
+    }
+  }
 
   if (showSettingsSheet) {
     SettingsSheet(
@@ -159,6 +210,7 @@ internal fun MainScreen(
       },
       debugExpanded = debugExpanded,
       onDebugExpandedChange = { debugExpanded = it },
+      onModelSelected = onModelSelected,
       onDismissRequest = { showSettingsSheet = false },
     )
   }
@@ -175,11 +227,12 @@ internal fun MainScreen(
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
   ) {
     LazyColumn(
+      state = listState,
       modifier = Modifier.fillMaxSize(),
       contentPadding =
         PaddingValues(
-          start = 16.dp,
-          end = 16.dp,
+          start = 12.dp,
+          end = 12.dp,
           top = contentPadding + 12.dp,
           bottom = composerHeightDp + 12.dp,
         ),
@@ -262,9 +315,9 @@ private fun ChatTopShell(
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         StatusPill(text = "当前模型", containerColor = WhaleSurface, contentColor = WhaleInk)
         StatusPill(
-          text = if (uiState.apiKeyConfigured) "Key 已就绪" else "Key 待配置",
-          containerColor = if (uiState.apiKeyConfigured) MaterialTheme.colorScheme.secondaryContainer else WhaleSurface,
-          contentColor = if (uiState.apiKeyConfigured) MaterialTheme.colorScheme.onSecondaryContainer else WhaleInk,
+          text = if (uiState.hasReadyApiKey()) "Key 已就绪" else "Key 待配置",
+          containerColor = if (uiState.hasReadyApiKey()) MaterialTheme.colorScheme.secondaryContainer else WhaleSurface,
+          contentColor = if (uiState.hasReadyApiKey()) MaterialTheme.colorScheme.onSecondaryContainer else WhaleInk,
         )
       }
 
@@ -415,6 +468,7 @@ private fun SettingsSheet(
   onResetClick: () -> Unit,
   debugExpanded: Boolean,
   onDebugExpandedChange: (Boolean) -> Unit,
+  onModelSelected: (String) -> Unit,
   onDismissRequest: () -> Unit,
 ) {
   ModalBottomSheet(onDismissRequest = onDismissRequest) {
@@ -435,6 +489,7 @@ private fun SettingsSheet(
         onSaveClick = onSaveClick,
         onResetClick = onResetClick,
       )
+      ModelSelectionPanel(uiState = uiState, onModelSelected = onModelSelected)
       Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
           Row(
@@ -457,6 +512,40 @@ private fun SettingsSheet(
         }
       }
       Spacer(modifier = Modifier.height(8.dp))
+    }
+  }
+}
+
+@Composable
+private fun ModelSelectionPanel(
+  uiState: AgentSessionSnapshot,
+  onModelSelected: (String) -> Unit,
+) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = RoundedCornerShape(20.dp),
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("DeepSeek 模型", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
+        Text(
+          "只开放已验证的模型，切换后下一轮对话立即生效。",
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+      Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        uiState.supportedModelIds.forEach { modelId ->
+          FilterChip(
+            selected = modelId == uiState.modelLabel,
+            onClick = { onModelSelected(modelId) },
+            label = { Text(modelId) },
+          )
+        }
+      }
     }
   }
 }
@@ -528,13 +617,13 @@ private fun ApiKeyPanel(
           )
         }
         Surface(
-          color = if (uiState.apiKeyConfigured) WhaleAccentSoft else WhaleSurface,
+          color = if (uiState.hasReadyApiKey()) WhaleAccentSoft else WhaleSurface,
           shape = RoundedCornerShape(999.dp),
         ) {
           Text(
-            if (uiState.apiKeyConfigured) "已就绪" else "待配置",
+            if (uiState.hasReadyApiKey()) "已就绪" else "待配置",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            color = if (uiState.apiKeyConfigured) WhaleAccent else WhaleInk,
+            color = if (uiState.hasReadyApiKey()) WhaleAccent else WhaleInk,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Medium,
           )
@@ -597,6 +686,11 @@ private fun TimelineBubble(
   onOpenLink: (String) -> Unit,
 ) {
   when (item.role) {
+    TimelineItemRole.Thinking -> {
+      ThinkingTraceCard(item = item)
+      return
+    }
+
     TimelineItemRole.Tool -> {
       ToolExecutionCard(item = item)
       return
@@ -609,6 +703,7 @@ private fun TimelineBubble(
   }
 
   val isUser = item.role == TimelineItemRole.User
+  val roleLabel = item.role.displayLabel(item.title)
   val backgroundColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
   val contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else WhaleInk
   val avatarEmoji = if (isUser) "🙂" else "🐋"
@@ -617,22 +712,22 @@ private fun TimelineBubble(
   Row(
     modifier = Modifier.fillMaxWidth(),
     horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    verticalAlignment = Alignment.Bottom,
+    verticalAlignment = Alignment.Top,
   ) {
-    if (!isUser) {
-      AvatarMarker(emoji = avatarEmoji, label = avatarLabel)
-      Spacer(modifier = Modifier.width(10.dp))
-    }
     Card(
       shape = RoundedCornerShape(24.dp),
       colors = CardDefaults.cardColors(containerColor = backgroundColor),
-      modifier = Modifier.widthIn(max = 340.dp).fillMaxWidth(0.88f),
+      elevation = CardDefaults.cardElevation(defaultElevation = if (isUser) 1.5.dp else 2.5.dp),
+      modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth(0.94f),
     ) {
-      Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-          item.title,
-          color = contentColor.copy(alpha = 0.72f),
-          style = MaterialTheme.typography.labelMedium,
+      Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        MessageHeader(
+          roleLabel = roleLabel,
+          avatarEmoji = avatarEmoji,
+          avatarLabel = avatarLabel,
+          contentColor = contentColor,
+          isStreaming = item.isStreaming,
+          isUser = isUser,
         )
         if (item.text.isNotBlank()) {
           if (!isUser) {
@@ -651,19 +746,224 @@ private fun TimelineBubble(
         }
       }
     }
-    if (isUser) {
-      Spacer(modifier = Modifier.width(10.dp))
-      AvatarMarker(emoji = avatarEmoji, label = avatarLabel)
+  }
+}
+
+@Composable
+private fun MessageHeader(
+  roleLabel: String,
+  avatarEmoji: String,
+  avatarLabel: String,
+  contentColor: Color,
+  isStreaming: Boolean,
+  isUser: Boolean,
+) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Row(
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      AvatarMarker(emoji = avatarEmoji, label = avatarLabel, size = 28.dp)
+      Text(
+        roleLabel,
+        color = contentColor.copy(alpha = 0.74f),
+        style = MaterialTheme.typography.labelMedium,
+      )
+    }
+    if (isStreaming && !isUser) {
+      Text(
+        "正在生成",
+        color = contentColor.copy(alpha = 0.62f),
+        style = MaterialTheme.typography.labelSmall,
+      )
     }
   }
 }
 
 @Composable
-private fun AvatarMarker(emoji: String, label: String) {
+private fun ThinkingTraceCard(item: TimelineItem) {
+  var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
+  val hasThinkingBody = item.text.isNotBlank()
+  Surface(
+    color = MaterialTheme.colorScheme.surface,
+    shape = RoundedCornerShape(16.dp),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)),
+    modifier = Modifier.widthIn(max = 320.dp),
+  ) {
+    if (!expanded && hasThinkingBody) {
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { expanded = true }
+          .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Row(
+          modifier = Modifier.weight(1f),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            "🧠",
+            style = MaterialTheme.typography.bodySmall,
+          )
+          Text(
+            "已折叠思考轨迹",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          if (item.isStreaming) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(14.dp),
+              strokeWidth = 1.8.dp,
+              color = MaterialTheme.colorScheme.primary,
+            )
+          }
+        }
+        Text(
+          "展开",
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.primary,
+        )
+      }
+    } else {
+      Column(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              "🧠",
+              style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+              if (item.isStreaming) "思考轨迹" else item.title,
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (item.isStreaming) {
+              CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                strokeWidth = 1.6.dp,
+                color = MaterialTheme.colorScheme.primary,
+              )
+            }
+          }
+          if (hasThinkingBody) {
+            TextButton(onClick = { expanded = false }) {
+              Text(
+                "收起",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+              )
+            }
+          }
+        }
+        Text(
+          item.text,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+      }
+    }
+  }
+}
+
+private data class BusinessCardPalette(
+  val containerColor: Color,
+  val outlineColor: Color,
+  val contentColor: Color,
+  val supportingColor: Color,
+  val nestedSurfaceColor: Color,
+  val actionContainerColor: Color,
+  val actionContentColor: Color,
+)
+
+@Composable
+private fun rememberBusinessCardPalette(): BusinessCardPalette {
+  val colorScheme = MaterialTheme.colorScheme
+  return remember(colorScheme) {
+    BusinessCardPalette(
+      containerColor = colorScheme.surface,
+      outlineColor = colorScheme.outlineVariant.copy(alpha = 0.78f),
+      contentColor = colorScheme.onSurface,
+      supportingColor = colorScheme.onSurfaceVariant,
+      nestedSurfaceColor = colorScheme.surfaceContainerLowest,
+      actionContainerColor = colorScheme.surfaceContainerLow,
+      actionContentColor = colorScheme.onSurface,
+    )
+  }
+}
+
+@Composable
+private fun BusinessCardChip(
+  text: String,
+  modifier: Modifier = Modifier,
+  containerColor: Color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+  contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+) {
+  Surface(color = containerColor, shape = RoundedCornerShape(999.dp), modifier = modifier) {
+    Text(
+      text,
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+      style = MaterialTheme.typography.labelMedium,
+      color = contentColor,
+    )
+  }
+}
+
+@Composable
+private fun BusinessCardSurface(
+  label: String,
+  modifier: Modifier = Modifier,
+  trailingChip: String? = null,
+  content: @Composable ColumnScope.(BusinessCardPalette) -> Unit,
+) {
+  val palette = rememberBusinessCardPalette()
+  Surface(
+    color = palette.containerColor,
+    shape = RoundedCornerShape(20.dp),
+    border = BorderStroke(1.dp, palette.outlineColor.copy(alpha = 0.52f)),
+    shadowElevation = 0.dp,
+    modifier = modifier.semantics { contentDescription = "$label 卡片" },
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        BusinessCardChip(text = label)
+        trailingChip?.let {
+          BusinessCardChip(
+            text = it,
+            containerColor = palette.actionContainerColor,
+            contentColor = palette.supportingColor,
+          )
+        }
+      }
+      content(palette)
+    }
+  }
+}
+
+@Composable
+private fun AvatarMarker(emoji: String, label: String, size: Dp = 36.dp) {
   Surface(
     color = MaterialTheme.colorScheme.surfaceContainerLow,
     shape = CircleShape,
-    modifier = Modifier.size(36.dp).semantics { contentDescription = label },
+    shadowElevation = 1.dp,
+    modifier = Modifier.size(size).semantics { contentDescription = label },
   ) {
     Box(contentAlignment = Alignment.Center) {
       Text(emoji, style = MaterialTheme.typography.titleMedium)
@@ -702,38 +1002,47 @@ private fun CardContent(
 @Composable
 private fun OptionCard(payload: OptionCardPayload, consumedCallbackCardIds: Set<String>, onSelectionSubmit: (SelectionAction) -> Unit) {
   val isConsumed = payload.cardId in consumedCallbackCardIds
-  Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
-    Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-      Text(payload.title, style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-      payload.description?.let {
-        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      }
-      payload.options.forEach { option ->
-        OutlinedButton(
-          onClick = { onSelectionSubmit(option.action) },
-          enabled = !isConsumed,
-          modifier = Modifier.fillMaxWidth(),
-          shape = RoundedCornerShape(16.dp),
-          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-        ) {
-          Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(option.title, color = WhaleInk, style = MaterialTheme.typography.titleSmall)
-            option.supportingText?.let {
-              Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-            }
+  BusinessCardSurface(label = "候选地点", trailingChip = if (isConsumed) "已处理" else null) { palette ->
+    Text(payload.title, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
+    payload.description?.let {
+      Text(it, style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
+    }
+    payload.options.forEach { option ->
+      OutlinedButton(
+        onClick = { onSelectionSubmit(option.action) },
+        enabled = !isConsumed,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, palette.outlineColor.copy(alpha = 0.42f)),
+        colors = ButtonDefaults.outlinedButtonColors(
+          containerColor = palette.actionContainerColor,
+          contentColor = palette.actionContentColor,
+          disabledContainerColor = palette.actionContainerColor.copy(alpha = 0.8f),
+          disabledContentColor = palette.supportingColor,
+        ),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+      ) {
+        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(option.title, color = palette.contentColor, style = MaterialTheme.typography.titleSmall)
+          option.supportingText?.let {
+            Text(it, color = palette.supportingColor, style = MaterialTheme.typography.bodySmall)
           }
         }
       }
-      if (payload.allowCustomInput) {
-        Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(16.dp)) {
-          Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(if (isConsumed) "这张卡片已处理" else "也可以继续直接输入", style = MaterialTheme.typography.labelLarge, color = WhaleInk)
-            Text(
-              payload.customInputHint ?: "你也可以继续用自然语言补充条件。",
-              style = MaterialTheme.typography.bodySmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-          }
+    }
+    if (payload.allowCustomInput) {
+      Surface(
+        color = palette.nestedSurfaceColor,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, palette.outlineColor.copy(alpha = 0.32f)),
+      ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+          Text(if (isConsumed) "这张卡片已处理" else "也可以继续直接输入", style = MaterialTheme.typography.labelLarge, color = palette.contentColor)
+          Text(
+            payload.customInputHint ?: "你也可以继续用自然语言补充条件。",
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.supportingColor,
+          )
         }
       }
     }
@@ -745,33 +1054,41 @@ private fun RouteCard(payload: RouteCardPayload, onOpenLink: (String) -> Unit) {
   var selectedTabIndex by remember(payload.destinationName) { mutableIntStateOf(0) }
   val selectedRoute = payload.routes.getOrElse(selectedTabIndex) { payload.routes.first() }
 
-  Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Column(modifier = Modifier.padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(payload.destinationName, style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-        Text(payload.destinationAddress, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+  BusinessCardSurface(label = "路线方案") { palette ->
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text(payload.destinationName, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
+      Text(payload.destinationAddress, style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
+    }
+    SecondaryScrollableTabRow(selectedTabIndex = selectedTabIndex, edgePadding = 0.dp, containerColor = Color.Transparent) {
+      payload.routes.forEachIndexed { index, route ->
+        Tab(selected = selectedTabIndex == index, onClick = { selectedTabIndex = index }, text = { Text(route.title) })
       }
-      SecondaryScrollableTabRow(selectedTabIndex = selectedTabIndex, edgePadding = 14.dp) {
-        payload.routes.forEachIndexed { index, route ->
-          Tab(selected = selectedTabIndex == index, onClick = { selectedTabIndex = index }, text = { Text(route.title) })
-        }
-      }
-      RouteModePanel(route = selectedRoute, modifier = Modifier.padding(horizontal = 14.dp))
-      OutlinedButton(
-        onClick = { onOpenLink(payload.openMapAction.uri) },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-        shape = RoundedCornerShape(16.dp),
-      ) {
-        Text(payload.openMapAction.label)
-      }
+    }
+    RouteModePanel(route = selectedRoute)
+    OutlinedButton(
+      onClick = { onOpenLink(payload.openMapAction.uri) },
+      modifier = Modifier.fillMaxWidth(),
+      shape = RoundedCornerShape(16.dp),
+      border = BorderStroke(1.dp, palette.outlineColor.copy(alpha = 0.72f)),
+      colors = ButtonDefaults.outlinedButtonColors(
+        containerColor = palette.actionContainerColor,
+        contentColor = palette.actionContentColor,
+      ),
+    ) {
+      Text(payload.openMapAction.label)
     }
   }
 }
 
 @Composable
 private fun RouteModePanel(route: RouteCardMode, modifier: Modifier = Modifier) {
-  Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(18.dp), modifier = modifier) {
-    Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = RoundedCornerShape(18.dp),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+    modifier = modifier,
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         StatBadge(label = "方式", value = route.title)
         StatBadge(label = "耗时", value = "${route.durationMinutes} 分钟")
@@ -784,36 +1101,44 @@ private fun RouteModePanel(route: RouteCardMode, modifier: Modifier = Modifier) 
 
 @Composable
 private fun StatBadge(label: String, value: String) {
-  Surface(color = WhaleSurface, shape = RoundedCornerShape(999.dp)) {
-    Text("$label · $value", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = WhaleInk, style = MaterialTheme.typography.labelLarge)
+  Surface(color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.62f), shape = RoundedCornerShape(999.dp)) {
+    Text(
+      "$label · $value",
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+      color = MaterialTheme.colorScheme.onSecondaryContainer,
+      style = MaterialTheme.typography.labelLarge,
+    )
   }
 }
 
 @Composable
 private fun HotelListCard(payload: HotelListCardPayload, onOpenLink: (String) -> Unit) {
-  Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
-    Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(payload.title, style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-        Text("锚点：${payload.anchorDestination}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("${payload.filterSummary} · ${payload.rankingLabel}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+  BusinessCardSurface(label = "酒店列表") { palette ->
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+      Text(payload.title, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
+      Text("锚点：${payload.anchorDestination}", style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
+      Text("${payload.filterSummary} · ${payload.rankingLabel}", style = MaterialTheme.typography.bodySmall, color = palette.supportingColor)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      payload.platformStatuses.forEach { platformStatus ->
+        HotelPlatformStatusChip(status = platformStatus)
       }
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        payload.platformStatuses.forEach { platformStatus ->
-          HotelPlatformStatusChip(status = platformStatus)
-        }
-      }
-      payload.hotels.forEach { hotel ->
-        HotelRow(hotel = hotel, onOpenLink = onOpenLink)
-      }
+    }
+    payload.hotels.forEach { hotel ->
+      HotelRow(hotel = hotel, onOpenLink = onOpenLink)
     }
   }
 }
 
 @Composable
 private fun HotelRow(hotel: HotelCardItem, onOpenLink: (String) -> Unit) {
-  Surface(color = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(18.dp)) {
-    Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+  Surface(
+    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    shape = RoundedCornerShape(18.dp),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
+    shadowElevation = 0.dp,
+  ) {
+    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       Text(hotel.name, style = MaterialTheme.typography.titleSmall, color = WhaleInk)
       Text(
         "约 ${hotel.distanceKm} km · ${hotel.summary}",
@@ -844,17 +1169,66 @@ private fun PlatformQuoteRow(quote: HotelPlatformQuote, onOpenLink: (String) -> 
 
 @Composable
 private fun ToolExecutionCard(item: TimelineItem) {
+  val marker = toolFeedbackMarker(item.title)
   Surface(
     color = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.92f),
     shape = RoundedCornerShape(16.dp),
+    shadowElevation = 1.dp,
     modifier = Modifier.widthIn(max = 288.dp),
   ) {
     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text("工具反馈", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(marker, style = MaterialTheme.typography.labelSmall)
+        Text("工具反馈", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+      }
       Text(item.title, color = WhaleInk, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
       Text(item.text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
     }
   }
+}
+
+private fun toolFeedbackMarker(title: String): String {
+  val normalized = title.lowercase()
+  return when {
+    "search" in normalized -> "🔎"
+    "route" in normalized || "map" in normalized -> "🧭"
+    "hotel" in normalized -> "🏨"
+    "emit" in normalized -> "🪄"
+    else -> "🛠️"
+  }
+}
+
+private fun AgentSessionSnapshot.hasReadyApiKey(): Boolean {
+  return apiKeyConfigured || hasLocalApiKeyOverride || !apiKeyStatusText.contains("未配置")
+}
+
+/**
+ * Returns true when the user is near the content bottom.
+ * Tolerates a few items below the last visible one so newly-inserted
+ * items (cards, tool feedback) that haven't scrolled into the viewport yet
+ * don't fool us into thinking the user was reading history.
+ */
+private fun LazyListState.isNearBottom(thresholdPx: Int): Boolean {
+  val info = layoutInfo
+  if (info.totalItemsCount == 0) return true
+  if (!canScrollForward) return true
+  val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
+  // If 3+ items are below the viewport, the user is browsing history.
+  // 0–2 items below = user was at the bottom; the new items just haven't scrolled in yet.
+  val itemsBelow = info.totalItemsCount - 1 - lastVisible.index
+  if (itemsBelow > 2) return false
+  val lastItemBottom = lastVisible.offset + lastVisible.size
+  return (info.viewportEndOffset - lastItemBottom) <= thresholdPx
+}
+
+private fun LazyListState.distanceFromContentBottom(): Int {
+  val info = layoutInfo
+  if (info.totalItemsCount == 0) return 0
+  if (!canScrollForward) return 0
+  val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return 0
+  if (lastVisible.index < info.totalItemsCount - 1) return Int.MAX_VALUE
+  val lastItemBottom = lastVisible.offset + lastVisible.size
+  return (info.viewportEndOffset - lastItemBottom).coerceAtLeast(0)
 }
 
 @Composable
@@ -932,6 +1306,13 @@ private fun DebugEventLevel.dotColor(): Color =
     DebugEventLevel.Info -> WhaleAccent
     DebugEventLevel.Warning -> Color(0xFFD68C16)
     DebugEventLevel.Error -> Color(0xFFC84A4A)
+  }
+
+private fun TimelineItemRole.displayLabel(fallbackTitle: String): String =
+  when (this) {
+    TimelineItemRole.User -> "用户"
+    TimelineItemRole.Assistant -> "助手"
+    else -> fallbackTitle
   }
 
 private fun String.toAnnotatedString(): AnnotatedString {

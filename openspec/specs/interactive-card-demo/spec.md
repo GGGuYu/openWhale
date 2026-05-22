@@ -1,7 +1,8 @@
 # interactive-card-demo Specification
 
 ## Purpose
-TBD - created by archiving change build-mobile-agent-demo. Update Purpose after archive.
+Define the interactive card types and interaction contracts used by the mobile agent demo chat workflow.
+
 ## Requirements
 ### Requirement: The demo SHALL support a reusable option card template
 The system SHALL provide a generic option card template that can display a title, a list of selectable options, and an optional custom-input path for cases where the predefined options are insufficient.
@@ -49,3 +50,35 @@ The system SHALL support a deterministic demo flow in which the user asks to nav
 - **THEN** the system presents a route card after destination confirmation
 - **THEN** the system collects hotel price and distance filters through option cards before presenting hotel results
 
+### Requirement: Tool execution feedback SHALL include a lightweight tool marker
+The system SHALL render tool execution feedback with a compact visual marker, such as an emoji or equivalent lightweight glyph, that helps users immediately recognize it as auxiliary tool activity.
+
+#### Scenario: Show a tool marker in the timeline
+- **WHEN** a tool execution feedback item is rendered in the chat timeline
+- **THEN** the item includes a lightweight tool marker near the tool label
+- **THEN** the marker remains visually subordinate to the tool text and does not overpower the surrounding content
+
+### Requirement: User-facing cards SHALL expose depth cues distinct from tool feedback
+The system SHALL use visual depth cues such as subtle shadow or elevation differences so interactive cards and user-facing business cards read as more important than tool feedback items.
+
+#### Scenario: Compare a business card and a tool feedback item
+- **WHEN** a route card, hotel list card, or option card is shown in the same timeline as tool feedback
+- **THEN** the business card presents stronger visual depth than the tool feedback item
+- **THEN** the tool feedback still remains readable without competing for primary attention
+
+### Requirement: Hotel clarification option cards SHALL render with valid callback payloads
+The system SHALL render hotel-filter clarification cards with a validator-compatible payload so the nearby-hotel flow can continue through structured budget or distance choices instead of failing at runtime.
+
+#### Scenario: Render a budget clarification card after the user asks for a cheaper nearby hotel
+- **GIVEN** the session already has a selected destination anchor
+- **AND** the user asks for a nearby cheap hotel without supplying a hotel budget
+- **WHEN** the assistant emits an option card to clarify the missing budget filter
+- **THEN** the timeline renders that budget option card successfully
+- **THEN** the app does not surface a generic `option` card validation failure in place of the card
+
+#### Scenario: Render a distance clarification card after budget has been collected
+- **GIVEN** the session already has a selected destination anchor and a confirmed hotel budget
+- **AND** the user still has not supplied a maximum hotel distance
+- **WHEN** the assistant emits an option card to clarify the missing distance filter
+- **THEN** the timeline renders that distance option card successfully
+- **THEN** the follow-up hotel search can continue through the structured option-card callback path

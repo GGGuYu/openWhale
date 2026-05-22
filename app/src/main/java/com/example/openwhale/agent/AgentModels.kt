@@ -8,11 +8,14 @@ data class ModelConfig(
   val modelId: String,
   val baseUrl: String,
   val apiKey: String,
+  val supportedModelIds: List<String> = listOf(modelId),
+  val streamingEnabled: Boolean = true,
 )
 
 data class ProviderConversationMessage(
   val role: ProviderMessageRole,
   val content: String? = null,
+  val reasoningContent: String? = null,
   val toolCalls: List<AgentToolCall> = emptyList(),
   val toolCallId: String? = null,
   val toolName: String? = null,
@@ -31,8 +34,19 @@ data class ProviderRequest(
   val tools: List<AgentToolDefinition>,
 )
 
+sealed interface ProviderStreamEvent {
+  data class TextDelta(
+    val delta: String,
+  ) : ProviderStreamEvent
+
+  data class ThinkingDelta(
+    val delta: String,
+  ) : ProviderStreamEvent
+}
+
 data class ProviderResponse(
   val text: String?,
+  val reasoningContent: String? = null,
   val toolCalls: List<AgentToolCall>,
   val finishReason: String?,
 )
@@ -151,12 +165,17 @@ interface WorkflowPromptPackRepository {
 interface LocalModelConfigStore {
   fun getApiKeyOverride(): String?
 
+  fun getModelIdOverride(): String?
+
   fun saveApiKeyOverride(apiKey: String?)
+
+  fun saveModelIdOverride(modelId: String?)
 }
 
 enum class TimelineItemRole {
   User,
   Assistant,
+  Thinking,
   Tool,
   Status,
 }
@@ -166,8 +185,36 @@ data class TimelineItem(
   val role: TimelineItemRole,
   val title: String,
   val text: String,
+  val turnId: String? = null,
   val cardPayload: AgentCardPayload? = null,
+  val isStreaming: Boolean = false,
 )
+
+sealed interface AgentPlaybackEvent {
+  val turnId: String
+
+  data class ThinkingUpdate(
+    override val turnId: String,
+    val text: String,
+    val done: Boolean,
+  ) : AgentPlaybackEvent
+
+  data class AssistantUpdate(
+    override val turnId: String,
+    val text: String,
+    val cardPayload: AgentCardPayload? = null,
+    val done: Boolean,
+  ) : AgentPlaybackEvent
+
+  data class ToolFeedback(
+    override val turnId: String,
+    val item: TimelineItem,
+  ) : AgentPlaybackEvent
+
+  data class AssistantBoundary(
+    override val turnId: String,
+  ) : AgentPlaybackEvent
+}
 
 data class AgentSessionSnapshot(
   val timeline: List<TimelineItem>,
@@ -175,6 +222,7 @@ data class AgentSessionSnapshot(
   val selectedWorkflowPackId: String,
   val providerLabel: String,
   val modelLabel: String,
+  val supportedModelIds: List<String> = emptyList(),
   val sessionContextState: SessionContextState,
   val apiKeyConfigured: Boolean = false,
   val hasLocalApiKeyOverride: Boolean = false,

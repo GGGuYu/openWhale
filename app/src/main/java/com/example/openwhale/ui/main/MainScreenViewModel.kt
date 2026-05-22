@@ -39,6 +39,10 @@ class MainScreenViewModel(private val agentSession: AgentSession) : ViewModel() 
     viewModelScope.launch { agentSession.updateApiKey(apiKey) }
   }
 
+  fun updateModelId(modelId: String) {
+    viewModelScope.launch { agentSession.updateModelId(modelId) }
+  }
+
   companion object {
     fun create(context: Context): MainScreenViewModel = MainScreenViewModel(OpenWhaleAppContainer(context).createSession())
   }

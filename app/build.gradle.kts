@@ -18,7 +18,7 @@ fun String.asBuildConfigString(): String = buildString {
 
 val deepSeekApiKey = providers.gradleProperty("DEEPSEEK_API_KEY").orElse(providers.environmentVariable("DEEPSEEK_API_KEY")).getOrElse("")
 val deepSeekBaseUrl = providers.gradleProperty("DEEPSEEK_BASE_URL").orElse(providers.environmentVariable("DEEPSEEK_BASE_URL")).getOrElse("https://api.deepseek.com")
-val deepSeekModel = providers.gradleProperty("DEEPSEEK_MODEL").orElse(providers.environmentVariable("DEEPSEEK_MODEL")).getOrElse("deepseek-chat")
+val deepSeekModel = providers.gradleProperty("DEEPSEEK_MODEL").orElse(providers.environmentVariable("DEEPSEEK_MODEL")).getOrElse("deepseek-v4-flash")
 val defaultWorkflowPack = providers.gradleProperty("OPENWHALE_WORKFLOW_PACK").orElse(providers.environmentVariable("OPENWHALE_WORKFLOW_PACK")).getOrElse("navigation_hotel")
 
 android {

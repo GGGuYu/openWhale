@@ -27,6 +27,7 @@ class AgentSession(
   private val baseModelConfig = modelConfig
   private var sessionContextState = SessionContextState()
   private var localApiKeyOverride = localModelConfigStore?.getApiKeyOverride()
+  private var localModelIdOverride = localModelConfigStore?.getModelIdOverride()
   private var modelConfig = resolvedModelConfig()
 
   private val _snapshot =
@@ -37,6 +38,7 @@ class AgentSession(
         selectedWorkflowPackId = workflowPromptPackRepository.get(initialWorkflowPackId).id,
         providerLabel = modelConfig.providerId,
         modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
         sessionContextState = sessionContextState,
         apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
         hasLocalApiKeyOverride = localApiKeyOverride != null,
@@ -56,6 +58,8 @@ class AgentSession(
       _snapshot.value.copy(
         timeline = initialTimeline(selectedPack),
         selectedWorkflowPackId = selectedPack.id,
+        modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
         sessionContextState = sessionContextState,
         apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
         hasLocalApiKeyOverride = localApiKeyOverride != null,
@@ -98,6 +102,41 @@ class AgentSession(
               text = statusText,
             ),
         apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+        modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
+        hasLocalApiKeyOverride = localApiKeyOverride != null,
+        apiKeyStatusText = apiKeyStatusText(),
+        errorMessage = null,
+      )
+  }
+
+  suspend fun updateModelId(modelId: String) {
+    val normalizedModelId = modelId.trim()
+    require(normalizedModelId in baseModelConfig.supportedModelIds) {
+      "暂不支持模型：$normalizedModelId"
+    }
+    if (normalizedModelId == modelConfig.modelId && localModelIdOverride == normalizedModelId) {
+      return
+    }
+
+    localModelConfigStore?.saveModelIdOverride(normalizedModelId)
+    localModelIdOverride = normalizedModelId
+    modelConfig = resolvedModelConfig()
+    val statusText = "已切换到 $normalizedModelId，后续请求将直接使用新模型。"
+    debugLogger.log(category = "session", message = statusText)
+    _snapshot.value =
+      _snapshot.value.copy(
+        timeline =
+          _snapshot.value.timeline +
+            TimelineItem(
+              id = UUID.randomUUID().toString(),
+              role = TimelineItemRole.Status,
+              title = "模型配置",
+              text = statusText,
+            ),
+        modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
+        apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
         hasLocalApiKeyOverride = localApiKeyOverride != null,
         apiKeyStatusText = apiKeyStatusText(),
         errorMessage = null,
@@ -133,6 +172,8 @@ class AgentSession(
         isSending = true,
         errorMessage = null,
         sessionContextState = currentState,
+        modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
         apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
         hasLocalApiKeyOverride = localApiKeyOverride != null,
         apiKeyStatusText = apiKeyStatusText(),
@@ -140,12 +181,128 @@ class AgentSession(
         timeline = _snapshot.value.timeline + TimelineItem(id = UUID.randomUUID().toString(), role = TimelineItemRole.User, title = "你", text = displayText),
       )
 
+    var activeThinkingItemId: String? = null
+    var activeAssistantItemId: String? = null
+
     runCatching {
       loopRunner.run(
         modelConfig = modelConfig,
         workflowPromptPack = workflowPromptPackRepository.get(_snapshot.value.selectedWorkflowPackId),
         conversationHistory = conversationHistory,
         currentState = currentState,
+        onPlaybackEvent = playback@{ event ->
+          when (event) {
+            is AgentPlaybackEvent.AssistantBoundary -> {
+              activeAssistantItemId = null
+            }
+
+            is AgentPlaybackEvent.ToolFeedback -> {
+              val currentSnapshot = _snapshot.value
+              _snapshot.value =
+                currentSnapshot.copy(
+                  timeline = currentSnapshot.timeline + event.item,
+                  modelLabel = modelConfig.modelId,
+                  supportedModelIds = modelConfig.supportedModelIds,
+                  sessionContextState = sessionContextState,
+                  apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+                  hasLocalApiKeyOverride = localApiKeyOverride != null,
+                  apiKeyStatusText = apiKeyStatusText(),
+                  debugEvents = debugLogger.events.value,
+                  isSending = true,
+                )
+            }
+
+            is AgentPlaybackEvent.ThinkingUpdate -> {
+              val currentSnapshot = _snapshot.value
+              val updatedTimeline = currentSnapshot.timeline.toMutableList()
+              val existingIndex = activeThinkingItemId?.let { id -> updatedTimeline.indexOfFirst { it.id == id } } ?: -1
+              if (existingIndex >= 0) {
+                val existingItem = updatedTimeline[existingIndex]
+                updatedTimeline[existingIndex] =
+                  existingItem.copy(
+                    text = event.text,
+                    isStreaming = !event.done,
+                  )
+              } else if (event.text.isNotBlank()) {
+                val itemId = UUID.randomUUID().toString()
+                activeThinkingItemId = itemId
+                updatedTimeline +=
+                  TimelineItem(
+                    id = itemId,
+                    role = TimelineItemRole.Thinking,
+                    title = "思考轨迹",
+                    text = event.text,
+                    turnId = event.turnId,
+                    isStreaming = !event.done,
+                  )
+              }
+              _snapshot.value =
+                currentSnapshot.copy(
+                  timeline = updatedTimeline,
+                  modelLabel = modelConfig.modelId,
+                  supportedModelIds = modelConfig.supportedModelIds,
+                  sessionContextState = sessionContextState,
+                  apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+                  hasLocalApiKeyOverride = localApiKeyOverride != null,
+                  apiKeyStatusText = apiKeyStatusText(),
+                  debugEvents = debugLogger.events.value,
+                  isSending = true,
+                )
+              if (event.done) {
+                activeThinkingItemId = null
+              }
+            }
+
+            is AgentPlaybackEvent.AssistantUpdate -> {
+              if (event.text.isBlank() && event.cardPayload == null) {
+                if (event.done) {
+                  activeAssistantItemId = null
+                }
+                return@playback
+              }
+              val currentSnapshot = _snapshot.value
+              val updatedTimeline = currentSnapshot.timeline.toMutableList()
+              val existingIndex = activeAssistantItemId?.let { id -> updatedTimeline.indexOfFirst { it.id == id } } ?: -1
+              if (existingIndex >= 0) {
+                val existingItem = updatedTimeline[existingIndex]
+                updatedTimeline[existingIndex] =
+                  existingItem.copy(
+                    text = event.text.ifBlank { existingItem.text },
+                    cardPayload = event.cardPayload ?: existingItem.cardPayload,
+                    isStreaming = !event.done,
+                  )
+              } else {
+                val itemId = UUID.randomUUID().toString()
+                activeAssistantItemId = itemId
+                updatedTimeline +=
+                  TimelineItem(
+                    id = itemId,
+                    role = TimelineItemRole.Assistant,
+                    title = "助手",
+                    text = event.text,
+                    turnId = event.turnId,
+                    cardPayload = event.cardPayload,
+                    isStreaming = !event.done,
+                  )
+              }
+              _snapshot.value =
+                currentSnapshot.copy(
+                  timeline = updatedTimeline,
+                  modelLabel = modelConfig.modelId,
+                  supportedModelIds = modelConfig.supportedModelIds,
+                  sessionContextState = sessionContextState,
+                  apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+                  hasLocalApiKeyOverride = localApiKeyOverride != null,
+                  apiKeyStatusText = apiKeyStatusText(),
+                  debugEvents = debugLogger.events.value,
+                  isSending = true,
+                )
+              if (event.done) {
+                activeAssistantItemId = null
+              }
+            }
+          }
+        },
       )
     }.onSuccess { result ->
       conversationHistory.clear()
@@ -155,6 +312,8 @@ class AgentSession(
       _snapshot.value =
         _snapshot.value.copy(
           timeline = _snapshot.value.timeline + result.timelineItems,
+          modelLabel = modelConfig.modelId,
+          supportedModelIds = modelConfig.supportedModelIds,
           sessionContextState = sessionContextState,
           apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
           hasLocalApiKeyOverride = localApiKeyOverride != null,
@@ -164,10 +323,22 @@ class AgentSession(
         )
     }.onFailure { throwable ->
       debugLogger.log(category = "session", message = throwable.message ?: "请求失败", level = DebugEventLevel.Error)
+      val currentTimeline = _snapshot.value.timeline
+      val stoppedTimeline =
+        currentTimeline.map { item ->
+          when (item.id) {
+            activeThinkingItemId,
+            activeAssistantItemId,
+            -> item.copy(isStreaming = false)
+            else -> item
+          }
+        }
+      activeThinkingItemId = null
+      activeAssistantItemId = null
       _snapshot.value =
         _snapshot.value.copy(
           timeline =
-            _snapshot.value.timeline +
+            stoppedTimeline +
               TimelineItem(
                 id = UUID.randomUUID().toString(),
                 role = TimelineItemRole.Status,
@@ -175,6 +346,8 @@ class AgentSession(
                 text = throwable.message ?: "请求失败",
               ),
           apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+          modelLabel = modelConfig.modelId,
+          supportedModelIds = modelConfig.supportedModelIds,
           hasLocalApiKeyOverride = localApiKeyOverride != null,
           apiKeyStatusText = apiKeyStatusText(),
           errorMessage = throwable.message,
@@ -192,7 +365,10 @@ class AgentSession(
     )
   }
 
-  private fun resolvedModelConfig(): ModelConfig = baseModelConfig.copy(apiKey = localApiKeyOverride ?: baseModelConfig.apiKey)
+  private fun resolvedModelConfig(): ModelConfig {
+    val resolvedModelId = localModelIdOverride?.takeIf { it in baseModelConfig.supportedModelIds } ?: baseModelConfig.modelId
+    return baseModelConfig.copy(modelId = resolvedModelId, apiKey = localApiKeyOverride ?: baseModelConfig.apiKey)
+  }
 
   private fun apiKeyStatusText(): String {
     return when {

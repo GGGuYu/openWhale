@@ -369,17 +369,24 @@ object DemoToolFactory {
 
   private fun buildGenericOptionCard(arguments: JsonObject, currentState: SessionContextState, cardKind: String?): OptionCardPayload {
     val explicitTitle = arguments["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-    val explicitOptions = parseOptionChoices(arguments["options"], cardId = null)
+    val resolvedCardKind =
+      cardKind?.takeIf(String::isNotBlank)
+        ?: inferOptionCardKind(
+          explicitTitle = explicitTitle,
+          optionsElement = arguments["options"],
+          currentState = currentState,
+        )
 
-    if (explicitTitle.isBlank() && explicitOptions.isEmpty()) {
-      require(!cardKind.isNullOrBlank()) { "emit_option_card 需要提供 card_kind，或直接提供 title 与 options。" }
-      return DemoCardPlanner.buildOptionCardByKind(cardKind = cardKind, state = currentState)
+    if (explicitTitle.isBlank() && arguments["options"]?.jsonArray?.isEmpty() != false) {
+      require(!resolvedCardKind.isNullOrBlank()) { "emit_option_card 需要提供 card_kind，或直接提供 title 与 options。" }
+      return DemoCardPlanner.buildOptionCardByKind(cardKind = resolvedCardKind, state = currentState)
     }
 
-    val template = cardKind?.takeIf(String::isNotBlank)?.let { DemoCardPlanner.templateByKind(it, currentState) }
+    val template = resolvedCardKind?.let { DemoCardPlanner.templateByKind(it, currentState) }
     val cardId = newOptionCardId()
     val options =
       parseOptionChoices(arguments["options"], cardId = cardId)
+        .map { option -> hydrateOptionChoice(option = option, templateOptions = template?.options.orEmpty(), resolvedCardKind = resolvedCardKind, cardId = cardId) }
         .ifEmpty {
           template?.options?.map { option ->
             option.copy(action = option.action.copy(sourceCardId = cardId))
@@ -393,6 +400,68 @@ object DemoToolFactory {
       allowCustomInput = arguments["allow_custom_input"]?.jsonPrimitive?.booleanOrNull ?: template?.allowCustomInput ?: false,
       customInputHint = arguments["custom_input_hint"]?.jsonPrimitive?.contentOrNull ?: template?.customInputHint,
       cardId = cardId,
+    )
+  }
+
+  private fun inferOptionCardKind(explicitTitle: String, optionsElement: JsonElement?, currentState: SessionContextState): String? {
+    val normalizedTitle = explicitTitle.lowercase()
+    val parsedOptions = parseOptionChoices(optionsElement, cardId = null)
+    return when {
+      currentState.selectedDestination != null &&
+        (parsedOptions.any { it.action.maxPrice != null } ||
+          parsedOptions.any { it.title.containsPriceHint() } ||
+          normalizedTitle.containsPriceHint()) -> "hotel_price"
+      currentState.selectedDestination != null &&
+        (parsedOptions.any { it.action.maxDistanceKm != null } ||
+          parsedOptions.any { it.title.containsDistanceHint() } ||
+          normalizedTitle.containsDistanceHint()) -> "hotel_distance"
+      currentState.destinationCandidates.isNotEmpty() &&
+        (parsedOptions.any { !it.action.selectedDestinationName.isNullOrBlank() } ||
+          normalizedTitle.contains("去哪") ||
+          normalizedTitle.contains("哪个点") ||
+          normalizedTitle.contains("目的地")) -> "destination_candidates"
+      else -> null
+    }
+  }
+
+  private fun hydrateOptionChoice(
+    option: OptionCardChoice,
+    templateOptions: List<OptionCardChoice>,
+    resolvedCardKind: String?,
+    cardId: String,
+  ): OptionCardChoice {
+    val matchedTemplate =
+      templateOptions.firstOrNull { templateOption ->
+        templateOption.id == option.id ||
+          templateOption.title == option.title ||
+          (templateOption.action.maxPrice != null && templateOption.action.maxPrice == option.action.maxPrice) ||
+          (templateOption.action.maxDistanceKm != null && templateOption.action.maxDistanceKm == option.action.maxDistanceKm) ||
+          (!templateOption.action.selectedDestinationName.isNullOrBlank() && templateOption.action.selectedDestinationName == option.action.selectedDestinationName)
+      }
+    val fallbackTitle = option.title.ifBlank { matchedTemplate?.title.orEmpty() }
+    val maxPrice = option.action.maxPrice ?: matchedTemplate?.action?.maxPrice ?: fallbackTitle.extractFirstPositiveInt().takeIf { resolvedCardKind == "hotel_price" }
+    val maxDistanceKm = option.action.maxDistanceKm ?: matchedTemplate?.action?.maxDistanceKm ?: fallbackTitle.extractFirstPositiveInt().takeIf { resolvedCardKind == "hotel_distance" }
+    val selectedDestinationName =
+      option.action.selectedDestinationName ?: matchedTemplate?.action?.selectedDestinationName ?: fallbackTitle.takeIf { resolvedCardKind == "destination_candidates" && it.isNotBlank() }
+    val generatedPromptText =
+      when (resolvedCardKind) {
+        "hotel_price" -> maxPrice?.let { "酒店预算 $it 元以内" }
+        "hotel_distance" -> maxDistanceKm?.let { "离目的地 $it 公里内" }
+        "destination_candidates" -> selectedDestinationName?.let { "我选 $it" }
+        else -> null
+      }
+    return option.copy(
+      title = fallbackTitle,
+      supportingText = option.supportingText ?: matchedTemplate?.supportingText,
+      action =
+        option.action.copy(
+          promptText = option.action.promptText.takeIf(String::isNotBlank) ?: matchedTemplate?.action?.promptText ?: generatedPromptText ?: fallbackTitle,
+          displayText = option.action.displayText.takeIf(String::isNotBlank) ?: matchedTemplate?.action?.displayText ?: fallbackTitle,
+          selectedDestinationName = selectedDestinationName,
+          maxPrice = maxPrice,
+          maxDistanceKm = maxDistanceKm,
+          sourceCardId = cardId,
+        ),
     )
   }
 
@@ -422,6 +491,20 @@ object DemoToolFactory {
   }
 
   private fun JsonObject.stringValue(key: String): String = this[key]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+
+  private fun String.containsPriceHint(): Boolean =
+    contains("预算") || contains("价") || contains("房价") || contains("¥") || contains("元")
+
+  private fun String.containsDistanceHint(): Boolean =
+    contains("多近") || contains("距离") || contains("公里") || contains("km")
+
+  private fun String.extractFirstPositiveInt(): Int? =
+    Regex("(\\d+)")
+      .find(this)
+      ?.groupValues
+      ?.getOrNull(1)
+      ?.toIntOrNull()
+      ?.takeIf { it > 0 }
 
   private fun newOptionCardId(): String = "option-${java.util.UUID.randomUUID()}"
 

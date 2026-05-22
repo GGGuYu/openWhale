@@ -1,10 +1,11 @@
 # mobile-agent-runtime Specification
 
 ## Purpose
-TBD - created by archiving change build-mobile-agent-demo. Update Purpose after archive.
+Define the runtime behavior for mobile agent sessions, provider integration, tool execution, and chat-timeline playback.
+
 ## Requirements
 ### Requirement: Mobile agent sessions SHALL support provider-backed basic chat
-The system SHALL provide a mobile-oriented agent session that can accept user chat messages, send them to a configured large model provider, and append assistant responses to the same session history.
+The system SHALL provide a mobile-oriented agent session that can accept user chat messages, send them to a configured large model provider, and append assistant responses to the same session history. The runtime SHALL support selecting from a constrained set of supported model IDs, including a DeepSeek v4 flash-tier model, without requiring runtime code changes for each switch.
 
 #### Scenario: Start a basic chat session
 - **WHEN** a user opens the demo chat and sends a plain text message that does not require tools
@@ -15,6 +16,11 @@ The system SHALL provide a mobile-oriented agent session that can accept user ch
 - **WHEN** the demo runtime is initialized for the first implementation
 - **THEN** the system can run with a single configured provider/model pair while keeping provider and workflow configuration replaceable
 - **THEN** later provider swaps do not require rewriting the agent loop
+
+#### Scenario: Switch to a supported model variant
+- **WHEN** the user or local runtime configuration selects another supported model ID such as `deepseek-v4-flash`
+- **THEN** the next request uses that selected model ID for provider calls
+- **THEN** the session runtime and workflow loop continue to work without a separate provider implementation
 
 ### Requirement: Mobile agent sessions SHALL support looped tool calling
 The system SHALL support an agent loop that can inspect a model response, execute declared tool calls, append tool results back into the session, and continue the session until the assistant reaches a normal response or waits for user interaction.
@@ -82,3 +88,31 @@ The runtime SHALL not surface two equivalent user-facing cards for the same work
 - **THEN** the runtime surfaces exactly one destination disambiguation card for that workflow step
 - **THEN** any fallback or compatibility card-generation path does not emit a second equivalent card for the same step
 
+### Requirement: The runtime SHALL support streaming provider responses
+The runtime SHALL support provider requests that return incremental assistant content chunks through the existing chat session flow.
+
+#### Scenario: Execute a chat turn with streaming enabled
+- **WHEN** the active model configuration enables streaming for a supported provider request
+- **THEN** the runtime receives assistant content incrementally instead of waiting only for a single final text payload
+- **THEN** the session state can expose those partial updates to the UI during the same assistant turn
+
+### Requirement: Thinking-mode metadata SHALL not break subsequent chat turns
+When the provider emits hidden thinking / reasoning content, the runtime SHALL either preserve the required provider-side metadata across rounds or explicitly disable that mode so a later user turn does not fail because `reasoning_content` was dropped.
+
+#### Scenario: Continue chatting after a provider emits reasoning metadata
+- **GIVEN** the provider has returned a response in thinking mode with hidden reasoning metadata
+- **WHEN** the user sends the next message in the same session
+- **THEN** the runtime does not trigger a provider `400 invalid_request_error` complaining that `reasoning_content` must be passed back to the API
+- **THEN** the user-visible timeline still only shows reply正文，而不是内部 thinking 内容
+
+### Requirement: The chat timeline SHALL auto-follow new messages only while pinned near the bottom
+The runtime and UI SHALL cooperate so that new assistant or tool outputs remain visible when the user is still near the latest message, while preserving the user's manual scroll position once the user has intentionally moved away from the bottom.
+
+#### Scenario: Auto-follow the latest message when user remains near bottom
+- **WHEN** the user is still at or near the latest timeline item and a new assistant or tool output arrives
+- **THEN** the UI scrolls as needed so the latest output remains visible
+
+#### Scenario: Do not interrupt manual review of older messages
+- **WHEN** the user has scrolled upward away from the latest timeline content and a new assistant or tool output arrives
+- **THEN** the UI does not forcibly jump back to the bottom
+- **THEN** the user can continue reviewing older messages until they intentionally return to the latest position

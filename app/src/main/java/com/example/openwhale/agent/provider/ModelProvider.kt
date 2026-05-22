@@ -1,8 +1,12 @@
 package com.example.openwhale.agent.provider
 
+import com.example.openwhale.agent.ProviderStreamEvent
 import com.example.openwhale.agent.ProviderRequest
 import com.example.openwhale.agent.ProviderResponse
 
-fun interface ModelProvider {
-  suspend fun complete(request: ProviderRequest): ProviderResponse
+interface ModelProvider {
+  suspend fun complete(
+    request: ProviderRequest,
+    onStreamEvent: suspend (ProviderStreamEvent) -> Unit = {},
+  ): ProviderResponse
 }

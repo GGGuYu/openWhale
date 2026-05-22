@@ -60,7 +60,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -182,7 +181,35 @@ internal fun MainScreen(
     if (uiState.timeline.isNotEmpty()) {
       withFrameNanos { }
       if (listState.isNearBottom(bottomPinThresholdPx)) {
-        listState.animateScrollToItem(uiState.timeline.size)
+        val last = uiState.timeline.lastOrNull()
+        val isCardOrTool = last?.cardPayload != null || last?.role == TimelineItemRole.Tool
+        if (isCardOrTool) {
+          // Constant-speed smooth scroll for large cards / tool output.
+          // We can't pre-measure the distance because LazyColumn composes items
+          // lazily — items below the viewport aren't composed until we scroll near
+          // them. Instead, scroll at ~2000 px/s until the bottom is reached, which
+          // naturally produces a ~500ms scroll for a typical 1000px card.
+          listState.scroll {
+            val startNanos = withFrameNanos { it }
+            val speedPxPerSec = 2000f
+            var lastFrameNanos = startNanos
+            var stalledFrames = 0
+            while (stalledFrames < 3) {
+              val now = withFrameNanos { it }
+              val deltaSec = ((now - lastFrameNanos).toFloat() / 1_000_000_000f).coerceIn(0f, 0.1f)
+              val scrollAmount = speedPxPerSec * deltaSec
+              val consumed = scrollBy(scrollAmount)
+              lastFrameNanos = now
+              if (consumed < 1f) {
+                stalledFrames++
+              } else {
+                stalledFrames = 0
+              }
+            }
+          }
+        } else {
+          listState.animateScrollToItem(uiState.timeline.size)
+        }
       }
     }
   }
@@ -1244,7 +1271,7 @@ private fun LazyListState.distanceFromContentBottom(): Int {
   val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return 0
   if (lastVisible.index < info.totalItemsCount - 1) return Int.MAX_VALUE
   val lastItemBottom = lastVisible.offset + lastVisible.size
-  return (info.viewportEndOffset - lastItemBottom).coerceAtLeast(0)
+  return (lastItemBottom - info.viewportEndOffset).coerceAtLeast(0)
 }
 
 @Composable

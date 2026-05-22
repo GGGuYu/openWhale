@@ -277,7 +277,6 @@ object AgentCardValidator {
             it.options.all { option ->
               option.id.isNotBlank() &&
                 option.title.isNotBlank() &&
-                option.supportingText?.isNotBlank() != false &&
                 option.action.promptText.isNotBlank() &&
                 option.action.displayText.isNotBlank() &&
                 (option.action.sourceCardId == null || option.action.sourceCardId == it.cardId) &&

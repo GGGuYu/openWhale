@@ -473,14 +473,15 @@ object DemoToolFactory {
       val promptText = optionObject["callback_prompt_text"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty().ifBlank {
         optionObject.stringValue("prompt_text")
       }
+      val titleText = optionObject.stringValue("title")
       OptionCardChoice(
-        id = optionObject.stringValue("id"),
-        title = optionObject.stringValue("title"),
+        id = optionObject.stringValue("id").ifBlank { "opt-${java.util.UUID.randomUUID()}" },
+        title = titleText,
         supportingText = optionObject["supporting_text"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf(String::isNotEmpty),
         action =
           SelectionAction(
             promptText = promptText,
-            displayText = optionObject["display_text"]?.jsonPrimitive?.contentOrNull ?: optionObject.stringValue("title"),
+            displayText = optionObject["display_text"]?.jsonPrimitive?.contentOrNull ?: titleText,
             selectedDestinationName = selectionObject?.get("selected_destination_name")?.jsonPrimitive?.contentOrNull ?: optionObject["selected_destination_name"]?.jsonPrimitive?.contentOrNull,
             maxPrice = selectionObject?.get("max_price")?.jsonPrimitive?.intOrNull ?: optionObject["max_price"]?.jsonPrimitive?.intOrNull,
             maxDistanceKm = selectionObject?.get("max_distance_km")?.jsonPrimitive?.intOrNull ?: optionObject["max_distance_km"]?.jsonPrimitive?.intOrNull,

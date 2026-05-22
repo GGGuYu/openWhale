@@ -575,6 +575,7 @@ class AgentSessionTest {
     val invalidCard =
       OptionCardPayload(
         cardId = "duplicate-card",
+        label = "请选择",
         title = "请选择",
         options =
           listOf(
@@ -591,6 +592,7 @@ class AgentSessionTest {
     val invalidCard =
       OptionCardPayload(
         cardId = "option-card-1",
+        label = "请选择",
         title = "请选择",
         options =
           listOf(

@@ -56,6 +56,7 @@ class MainScreenTest {
           cardPayload =
             OptionCardPayload(
               cardId = "preview-option-card",
+              label = "候选地点",
               title = "你想去哪个点？",
               options =
                 listOf(
@@ -363,6 +364,7 @@ class MainScreenTest {
                 cardPayload =
                   OptionCardPayload(
                     cardId = "test-card",
+                    label = "候选地点",
                     title = "你想去哪个点？",
                     options =
                       listOf(

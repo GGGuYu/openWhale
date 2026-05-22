@@ -310,7 +310,7 @@ class AgentSession(
                   TimelineItem(
                     id = itemId,
                     role = TimelineItemRole.Assistant,
-                    title = "助手",
+                    title = "Deepseek",
                     text = event.text,
                     turnId = event.turnId,
                     cardPayload = event.cardPayload,

@@ -48,9 +48,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -734,7 +732,7 @@ private fun TimelineBubble(
   val backgroundColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow
   val contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else WhaleInk
   val avatarEmoji = if (isUser) "🙂" else "🐋"
-  val avatarLabel = if (isUser) "用户头像" else "助手头像"
+  val avatarLabel = if (isUser) "你的头像" else "Deepseek 头像"
 
   Row(
     modifier = Modifier.fillMaxWidth(),
@@ -936,13 +934,13 @@ private fun rememberBusinessCardPalette(): BusinessCardPalette {
 private fun BusinessCardChip(
   text: String,
   modifier: Modifier = Modifier,
-  containerColor: Color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-  contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+  containerColor: Color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+  contentColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
 ) {
-  Surface(color = containerColor, shape = RoundedCornerShape(999.dp), modifier = modifier) {
+  Surface(color = containerColor, shape = RoundedCornerShape(8.dp), modifier = modifier) {
     Text(
       text,
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
       style = MaterialTheme.typography.labelMedium,
       color = contentColor,
     )
@@ -987,7 +985,7 @@ private fun BusinessCardSurface(
 @Composable
 private fun AvatarMarker(emoji: String, label: String, size: Dp = 36.dp) {
   Surface(
-    color = MaterialTheme.colorScheme.surfaceContainerLow,
+    color = MaterialTheme.colorScheme.surfaceContainerHighest,
     shape = CircleShape,
     shadowElevation = 1.dp,
     modifier = Modifier.size(size).semantics { contentDescription = label },
@@ -1029,7 +1027,7 @@ private fun CardContent(
 @Composable
 private fun OptionCard(payload: OptionCardPayload, consumedCallbackCardIds: Set<String>, onSelectionSubmit: (SelectionAction) -> Unit) {
   val isConsumed = payload.cardId in consumedCallbackCardIds
-  BusinessCardSurface(label = "候选地点", trailingChip = if (isConsumed) "已处理" else null) { palette ->
+  BusinessCardSurface(label = payload.label, trailingChip = if (isConsumed) "已处理" else null) { palette ->
     Text(payload.title, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
     payload.description?.let {
       Text(it, style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
@@ -1086,9 +1084,30 @@ private fun RouteCard(payload: RouteCardPayload, onOpenLink: (String) -> Unit) {
       Text(payload.destinationName, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
       Text(payload.destinationAddress, style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
     }
-    SecondaryScrollableTabRow(selectedTabIndex = selectedTabIndex, edgePadding = 0.dp, containerColor = Color.Transparent) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
       payload.routes.forEachIndexed { index, route ->
-        Tab(selected = selectedTabIndex == index, onClick = { selectedTabIndex = index }, text = { Text(route.title) })
+        FilterChip(
+          selected = selectedTabIndex == index,
+          onClick = { selectedTabIndex = index },
+          label = {
+            Box(
+              modifier = Modifier.fillMaxSize(),
+              contentAlignment = Alignment.Center,
+            ) {
+              Box(contentAlignment = Alignment.Center) {
+                Text(
+                  text = modeEmoji(route.mode),
+                  style = MaterialTheme.typography.titleMedium,
+                )
+              }
+            }
+          },
+          modifier = Modifier.weight(1f),
+          shape = RoundedCornerShape(12.dp),
+        )
       }
     }
     RouteModePanel(route = selectedRoute)
@@ -1115,38 +1134,81 @@ private fun RouteModePanel(route: RouteCardMode, modifier: Modifier = Modifier) 
     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
     modifier = modifier,
   ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatBadge(label = "方式", value = route.title)
-        StatBadge(label = "耗时", value = "${route.durationMinutes} 分钟")
-        StatBadge(label = "距离", value = "${route.distanceKm} km")
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(14.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Bottom,
+      ) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(
+            text = route.title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+          Text(
+            text = "约 ${route.durationMinutes} 分钟",
+            style = MaterialTheme.typography.headlineSmall,
+            color = WhaleInk,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+          Text(
+            text = modeEmoji(route.mode),
+            style = MaterialTheme.typography.titleMedium,
+          )
+          Text(
+            text = "${route.distanceKm} km",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
       }
-      Text(route.summary, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+      Text(
+        route.summary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodyMedium,
+      )
     }
   }
 }
 
-@Composable
-private fun StatBadge(label: String, value: String) {
-  Surface(color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.62f), shape = RoundedCornerShape(999.dp)) {
-    Text(
-      "$label · $value",
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-      color = MaterialTheme.colorScheme.onSecondaryContainer,
-      style = MaterialTheme.typography.labelLarge,
-    )
-  }
+private fun modeEmoji(mode: String): String = when (mode) {
+  "drive" -> "🚗"
+  "transit" -> "🚌"
+  "walk" -> "🚶"
+  "bike" -> "🚲"
+  else -> "📍"
 }
 
 @Composable
 private fun HotelListCard(payload: HotelListCardPayload, onOpenLink: (String) -> Unit) {
   BusinessCardSurface(label = "酒店列表") { palette ->
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-      Text(payload.title, style = MaterialTheme.typography.titleMedium, color = palette.contentColor)
-      Text("锚点：${payload.anchorDestination}", style = MaterialTheme.typography.bodyMedium, color = palette.supportingColor)
-      Text("${payload.filterSummary} · ${payload.rankingLabel}", style = MaterialTheme.typography.bodySmall, color = palette.supportingColor)
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      Text(
+        "锚点 ${payload.anchorDestination}",
+        style = MaterialTheme.typography.labelMedium,
+        color = palette.contentColor,
+      )
+      Text(
+        payload.filterSummary,
+        style = MaterialTheme.typography.labelMedium,
+        color = palette.supportingColor,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       payload.platformStatuses.forEach { platformStatus ->
         HotelPlatformStatusChip(status = platformStatus)
       }
@@ -1159,13 +1221,17 @@ private fun HotelListCard(payload: HotelListCardPayload, onOpenLink: (String) ->
 
 @Composable
 private fun HotelRow(hotel: HotelCardItem, onOpenLink: (String) -> Unit) {
+  val minPrice = hotel.platformQuotes.minOfOrNull { it.price }
   Surface(
     color = MaterialTheme.colorScheme.surfaceContainerLow,
     shape = RoundedCornerShape(18.dp),
     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.28f)),
     shadowElevation = 0.dp,
   ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+      modifier = Modifier.fillMaxWidth().padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
       Text(hotel.name, style = MaterialTheme.typography.titleSmall, color = WhaleInk)
       Text(
         "约 ${hotel.distanceKm} km · ${hotel.summary}",
@@ -1174,22 +1240,41 @@ private fun HotelRow(hotel: HotelCardItem, onOpenLink: (String) -> Unit) {
         maxLines = 2,
         overflow = TextOverflow.Ellipsis,
       )
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f))
       hotel.platformQuotes.forEach { quote ->
-        PlatformQuoteRow(quote = quote, onOpenLink = onOpenLink)
+        PlatformQuoteRow(
+          quote = quote,
+          isLowestPrice = quote.price == minPrice,
+          onOpenLink = onOpenLink,
+        )
       }
     }
   }
 }
 
 @Composable
-private fun PlatformQuoteRow(quote: HotelPlatformQuote, onOpenLink: (String) -> Unit) {
-  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+private fun PlatformQuoteRow(quote: HotelPlatformQuote, isLowestPrice: Boolean, onOpenLink: (String) -> Unit) {
+  val priceColor = if (isLowestPrice) WhaleAccent else MaterialTheme.colorScheme.onSurfaceVariant
+  val priceWeight = if (isLowestPrice) FontWeight.Bold else FontWeight.Normal
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
       Text(quote.platform, color = WhaleInk, style = MaterialTheme.typography.labelLarge)
-      Text("¥${quote.price}", color = WhaleAccent, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+      Text("¥${quote.price}", color = priceColor, style = MaterialTheme.typography.titleMedium, fontWeight = priceWeight)
     }
-    OutlinedButton(onClick = { onOpenLink(quote.actionUri) }, shape = RoundedCornerShape(14.dp)) {
-      Text(quote.actionLabel)
+    OutlinedButton(
+      onClick = { onOpenLink(quote.actionUri) },
+      shape = RoundedCornerShape(14.dp),
+      border = BorderStroke(1.dp, WhaleAccent.copy(alpha = 0.6f)),
+      colors = ButtonDefaults.outlinedButtonColors(
+        containerColor = WhaleAccent.copy(alpha = 0.08f),
+        contentColor = WhaleAccent,
+      ),
+    ) {
+      Text(quote.actionLabel, fontWeight = FontWeight.Medium)
     }
   }
 }
@@ -1277,15 +1362,25 @@ private fun LazyListState.distanceFromContentBottom(): Int {
 @Composable
 private fun HotelPlatformStatusChip(status: HotelPlatformStatus) {
   Surface(
-    color = if (status.hasMatches) WhaleSurface else MaterialTheme.colorScheme.surface,
-    shape = RoundedCornerShape(999.dp),
+    color = if (status.hasMatches) WhaleSurface else MaterialTheme.colorScheme.surfaceContainerHighest,
+    shape = RoundedCornerShape(8.dp),
   ) {
-    Text(
-      "${status.platform} · ${status.statusText}",
-      modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-      color = if (status.hasMatches) WhaleInk else MaterialTheme.colorScheme.onSurfaceVariant,
-      style = MaterialTheme.typography.labelMedium,
-    )
+    Row(
+      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+      horizontalArrangement = Arrangement.spacedBy(4.dp),
+      verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+        status.platform,
+        color = if (status.hasMatches) WhaleInk else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelMedium,
+      )
+      Text(
+        status.statusText,
+        color = if (status.hasMatches) WhaleAccent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        style = MaterialTheme.typography.labelSmall,
+      )
+    }
   }
 }
 
@@ -1353,8 +1448,8 @@ private fun DebugEventLevel.dotColor(): Color =
 
 private fun TimelineItemRole.displayLabel(fallbackTitle: String): String =
   when (this) {
-    TimelineItemRole.User -> "用户"
-    TimelineItemRole.Assistant -> "助手"
+    TimelineItemRole.User -> "你"
+    TimelineItemRole.Assistant -> "Deepseek"
     else -> fallbackTitle
   }
 
@@ -1410,6 +1505,7 @@ private fun MainScreenPreview() {
                 cardPayload =
                   OptionCardPayload(
                     cardId = "preview-card",
+                    label = "候选地点",
                     title = "你想去哪个点？",
                     description = "先确认目的地，我再给你路线。",
                     options =

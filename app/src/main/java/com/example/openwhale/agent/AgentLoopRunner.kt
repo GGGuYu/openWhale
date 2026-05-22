@@ -141,7 +141,7 @@ class AgentLoopRunner(
             executedToolNames = batchResult.finalizedToolCalls.map { it.preparedCall.toolCall.name },
           )
 
-      if (batchResult.finalizedToolCalls.any(FinalizedToolCall::isCardEmission)) {
+      if (batchResult.finalizedToolCalls.any { it.isCardEmission && it.result.cardPayload != null }) {
         assistantCard?.let { card ->
           onPlaybackEvent(
             AgentPlaybackEvent.AssistantUpdate(

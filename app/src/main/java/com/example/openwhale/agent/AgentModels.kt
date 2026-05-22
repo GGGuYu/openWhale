@@ -259,6 +259,7 @@ sealed interface AgentCardPayload {
 
 data class OptionCardPayload(
   val cardId: String,
+  val label: String,
   val title: String,
   val description: String? = null,
   val options: List<OptionCardChoice>,

@@ -342,26 +342,34 @@ object DemoToolFactory {
         val cardKind = arguments["card_kind"]?.jsonPrimitive?.contentOrNull
         val card =
           AgentCardValidator.validate(
-            buildGenericOptionCard(arguments = arguments, currentState = currentState, cardKind = cardKind),
+            runCatching { buildGenericOptionCard(arguments = arguments, currentState = currentState, cardKind = cardKind) }.getOrNull(),
           )
-        ToolExecutionResult(
-          displayText =
-            if (cardKind.isNullOrBlank()) {
-              "emit_option_card 已发出通用选项卡。"
-            } else {
-              "emit_option_card 已发出 ${cardKind} 选项卡。"
-            },
-          modelPayload =
-            json.encodeToString(
-              buildJsonObject {
-                put("card_type", JsonPrimitive("option"))
-                cardKind?.let { put("card_kind", JsonPrimitive(it)) }
-                put("title", JsonPrimitive((card as? OptionCardPayload)?.title.orEmpty()))
+        if (card == null) {
+          ToolExecutionResult(
+            displayText = "emit_option_card 失败：卡片校验未通过。",
+            modelPayload = json.encodeToString(buildJsonObject { put("error", JsonPrimitive("卡片数据校验失败，请检查必填字段（title、options）是否完整，或确认 card_kind 所需的会话状态是否就绪。")) }),
+            nextState = currentState,
+          )
+        } else {
+          ToolExecutionResult(
+            displayText =
+              if (cardKind.isNullOrBlank()) {
+                "emit_option_card 已发出通用选项卡。"
+              } else {
+                "emit_option_card 已发出 ${cardKind} 选项卡。"
               },
-            ),
-          nextState = currentState,
-          cardPayload = requireNotNull(card) { "option 卡片校验失败。" },
-        )
+            modelPayload =
+              json.encodeToString(
+                buildJsonObject {
+                  put("card_type", JsonPrimitive("option"))
+                  cardKind?.let { put("card_kind", JsonPrimitive(it)) }
+                  put("title", JsonPrimitive((card as OptionCardPayload).title))
+                },
+              ),
+            nextState = currentState,
+            cardPayload = card,
+          )
+        }
       },
       kind = AgentToolKind.Card,
     )
@@ -523,12 +531,20 @@ object DemoToolFactory {
         ),
       executor = AgentToolExecutor { _, currentState ->
         val card = AgentCardValidator.validate(currentState.latestRouteCard)
-        ToolExecutionResult(
-          displayText = "emit_route_card 已发出路线卡片。",
-          modelPayload = json.encodeToString(buildJsonObject { put("card_type", JsonPrimitive("route")) }),
-          nextState = currentState,
-          cardPayload = requireNotNull(card) { "当前没有可展示的路线卡片，请先调用 get_route_options。" },
-        )
+        if (card == null) {
+          ToolExecutionResult(
+            displayText = "emit_route_card 失败：当前没有可展示的路线卡片。",
+            modelPayload = json.encodeToString(buildJsonObject { put("error", JsonPrimitive("当前没有可展示的路线卡片，请先调用 get_route_options 获取路线数据。")) }),
+            nextState = currentState,
+          )
+        } else {
+          ToolExecutionResult(
+            displayText = "emit_route_card 已发出路线卡片。",
+            modelPayload = json.encodeToString(buildJsonObject { put("card_type", JsonPrimitive("route")) }),
+            nextState = currentState,
+            cardPayload = card,
+          )
+        }
       },
       kind = AgentToolKind.Card,
     )
@@ -561,12 +577,20 @@ object DemoToolFactory {
       executor = AgentToolExecutor { arguments, currentState ->
         val ranking = HotelListRanking.fromWireValue(arguments["ranking"]?.jsonPrimitive?.content)
         val card = AgentCardValidator.validate(DemoCardPlanner.hotelCard(currentState, ranking = ranking))
-        ToolExecutionResult(
-          displayText = "emit_hotel_list_card 已发出酒店列表卡片，排序=${ranking.wireValue}。",
-          modelPayload = json.encodeToString(buildJsonObject { put("card_type", JsonPrimitive("hotel_list")); put("ranking", JsonPrimitive(ranking.wireValue)) }),
-          nextState = currentState,
-          cardPayload = requireNotNull(card) { "当前没有可展示的酒店结果，请先调用酒店查询工具。" },
-        )
+        if (card == null) {
+          ToolExecutionResult(
+            displayText = "emit_hotel_list_card 失败：当前筛选条件下无匹配酒店。",
+            modelPayload = json.encodeToString(buildJsonObject { put("error", JsonPrimitive("当前筛选条件下没有可展示的酒店结果，请建议用户放宽预算或距离条件，或尝试切换排序策略。")) }),
+            nextState = currentState,
+          )
+        } else {
+          ToolExecutionResult(
+            displayText = "emit_hotel_list_card 已发出酒店列表卡片，排序=${ranking.wireValue}。",
+            modelPayload = json.encodeToString(buildJsonObject { put("card_type", JsonPrimitive("hotel_list")); put("ranking", JsonPrimitive(ranking.wireValue)) }),
+            nextState = currentState,
+            cardPayload = card,
+          )
+        }
       },
       kind = AgentToolKind.Card,
     )

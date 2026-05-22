@@ -19,6 +19,7 @@ object DemoCardPlanner {
   ): OptionCardPayload {
     return OptionCardPayload(
       cardId = cardId,
+      label = "候选地点",
       title = "你想去哪个点？",
       description = "先确认目的地，我再给你路线。",
       options =
@@ -41,6 +42,7 @@ object DemoCardPlanner {
   ): OptionCardPayload {
     return OptionCardPayload(
       cardId = cardId,
+      label = "预算选择",
       title = "酒店预算想控制在多少？",
       description = "我会按 ${destinationName} 附近筛便宜酒店。",
       options =
@@ -67,6 +69,7 @@ object DemoCardPlanner {
   ): OptionCardPayload {
     return OptionCardPayload(
       cardId = cardId,
+      label = "距离范围",
       title = "离 ${destinationName} 多近比较合适？",
       description = "我再补一个距离条件就能出结果。",
       options =
@@ -104,8 +107,8 @@ object DemoCardPlanner {
       hotelPlatforms.map { platform ->
         val platformResults = state.hotelResultsByPlatform[platform]
         when {
-          platformResults == null -> HotelPlatformStatus(platform = platform, statusText = "尚未查询", hasMatches = false)
-          platformResults.isEmpty() -> HotelPlatformStatus(platform = platform, statusText = "当前筛选下无匹配", hasMatches = false)
+          platformResults == null -> HotelPlatformStatus(platform = platform, statusText = "未查询", hasMatches = false)
+          platformResults.isEmpty() -> HotelPlatformStatus(platform = platform, statusText = "无匹配", hasMatches = false)
           else -> HotelPlatformStatus(platform = platform, statusText = "${platformResults.size} 家可选", hasMatches = true)
         }
       }
@@ -196,6 +199,7 @@ object DemoCardPlanner {
   ): OptionCardPayload {
     return OptionCardPayload(
       cardId = cardId,
+      label = "请选择",
       title = title.trim(),
       description = description?.trim()?.takeIf(String::isNotEmpty),
       options = options,

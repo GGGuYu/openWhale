@@ -69,6 +69,25 @@ class AgentSession(
       )
   }
 
+  suspend fun resetSession() {
+    val currentPack = workflowPromptPackRepository.get(_snapshot.value.selectedWorkflowPackId)
+    conversationHistory.clear()
+    sessionContextState = SessionContextState()
+    debugLogger.log(category = "session", message = "开始新对话")
+    _snapshot.value =
+      _snapshot.value.copy(
+        timeline = initialTimeline(currentPack),
+        sessionContextState = sessionContextState,
+        modelLabel = modelConfig.modelId,
+        supportedModelIds = modelConfig.supportedModelIds,
+        apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+        hasLocalApiKeyOverride = localApiKeyOverride != null,
+        apiKeyStatusText = apiKeyStatusText(),
+        errorMessage = null,
+        isSending = false,
+      )
+  }
+
   suspend fun updateApiKey(apiKey: String) {
     val normalizedOverride = apiKey.trim().takeIf(String::isNotEmpty)
     if (normalizedOverride == localApiKeyOverride) {
@@ -390,11 +409,7 @@ class AgentSession(
   }
 
   private fun initialTimeline(selectedPack: WorkflowPromptPack): List<TimelineItem> {
-    val configHint = if (modelConfig.apiKey.isBlank()) "未检测到可用的 DeepSeek API Key，联网对话会失败。" else "已就绪，可直接开始。"
-    return listOf(
-      TimelineItem(id = UUID.randomUUID().toString(), role = TimelineItemRole.Status, title = "工作流", text = "当前工作流：${selectedPack.title}。${selectedPack.starterPrompt}"),
-      TimelineItem(id = UUID.randomUUID().toString(), role = TimelineItemRole.Status, title = "模型", text = "${modelConfig.providerId} / ${modelConfig.modelId}。$configHint"),
-    )
+    return emptyList()
   }
 
   private fun resolvedModelConfig(): ModelConfig {

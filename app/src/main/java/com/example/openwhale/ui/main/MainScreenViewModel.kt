@@ -39,6 +39,10 @@ class MainScreenViewModel(private val agentSession: AgentSession) : ViewModel() 
     viewModelScope.launch { agentSession.updateApiKey(apiKey) }
   }
 
+  fun resetSession() {
+    viewModelScope.launch { agentSession.resetSession() }
+  }
+
   fun updateModelId(modelId: String) {
     viewModelScope.launch { agentSession.updateModelId(modelId) }
   }

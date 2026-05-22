@@ -19,8 +19,10 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -35,7 +37,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -124,6 +132,7 @@ fun MainScreen(
       inputText = ""
     },
     onWorkflowPackSelected = resolvedViewModel::selectWorkflowPack,
+    onResetSession = resolvedViewModel::resetSession,
     onSelectionSubmit = resolvedViewModel::submitSelection,
     onApiKeySave = resolvedViewModel::updateApiKey,
     onModelSelected = resolvedViewModel::updateModelId,
@@ -140,6 +149,7 @@ internal fun MainScreen(
   onInputChange: (String) -> Unit = {},
   onSendClick: () -> Unit = {},
   onWorkflowPackSelected: (String) -> Unit = {},
+  onResetSession: () -> Unit = {},
   onSelectionSubmit: (SelectionAction) -> Unit = {},
   onApiKeySave: (String) -> Unit = {},
   onModelSelected: (String) -> Unit = {},
@@ -153,8 +163,6 @@ internal fun MainScreen(
   var apiKeyInput by rememberSaveable { mutableStateOf("") }
   var composerHeightPx by remember { mutableIntStateOf(0) }
   val composerHeightDp = with(density) { composerHeightPx.toDp() }
-  val recentConversations = remember(uiState.timeline, uiState.selectedWorkflowPackId, uiState.sessionContextState) { buildRecentConversationItems(uiState) }
-
   // Tail-content change key: recomputes whenever the latest item's identity or visible
   // content changes (new item added, text grows, card payload changes, streaming flag toggles).
   val tailChangeKey = remember(uiState.timeline.lastOrNull(), uiState.timeline.size) {
@@ -241,146 +249,90 @@ internal fun MainScreen(
   }
 
   if (showHistorySheet) {
-    HistorySheet(items = recentConversations, onDismissRequest = { showHistorySheet = false })
+    HistorySheet(
+      uiState = uiState,
+      onWorkflowPackSelected = onWorkflowPackSelected,
+      onShowSettings = { showSettingsSheet = true },
+      onDismissRequest = { showHistorySheet = false },
+    )
   }
 
-  Box(
+  Column(
     modifier =
       modifier
         .fillMaxSize()
         .background(MaterialTheme.colorScheme.background)
-        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)),
   ) {
-    LazyColumn(
-      state = listState,
-      modifier = Modifier.fillMaxSize(),
-      contentPadding =
-        PaddingValues(
-          start = 12.dp,
-          end = 12.dp,
-          top = contentPadding + 12.dp,
-          bottom = composerHeightDp + 12.dp,
-        ),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-      item {
-        ChatTopShell(
-          uiState = uiState,
-          onWorkflowPackSelected = onWorkflowPackSelected,
-          onShowSettings = { showSettingsSheet = true },
-          onShowHistory = { showHistorySheet = true },
-        )
-      }
+    ChatTopBar(
+      uiState = uiState,
+      onMenuClick = { showHistorySheet = true },
+      onNewChatClick = onResetSession,
+    )
 
-      items(uiState.timeline, key = TimelineItem::id) { item ->
-        TimelineBubble(
-          item = item,
-          consumedCallbackCardIds = uiState.sessionContextState.consumedCallbackCardIds,
-          onSelectionSubmit = onSelectionSubmit,
-          onOpenLink = { uri -> openExternalLink(context = context, uri = uri) },
-        )
-      }
-    }
-
-    Box(modifier = Modifier.align(Alignment.BottomCenter)) {
-      ComposerBar(
-        inputText = inputText,
-        uiState = uiState,
-        onInputChange = onInputChange,
-        onSendClick = onSendClick,
-        onMeasured = { composerHeightPx = it },
-      )
-    }
-  }
-}
-
-@Composable
-private fun ChatTopShell(
-  uiState: AgentSessionSnapshot,
-  onWorkflowPackSelected: (String) -> Unit,
-  onShowSettings: () -> Unit,
-  onShowHistory: () -> Unit,
-) {
-  Surface(
-    color = MaterialTheme.colorScheme.surfaceContainerLow,
-    shape = RoundedCornerShape(30.dp),
-    tonalElevation = 1.dp,
-  ) {
-    Column(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+      LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding =
+          PaddingValues(
+            start = 12.dp,
+            end = 12.dp,
+            top = 12.dp,
+            bottom = composerHeightDp + 12.dp,
+          ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          Text("OpenWhale", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
-          Text(
-            "${uiState.providerLabel} · ${uiState.modelLabel}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-          )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          AssistChip(
-            onClick = onShowHistory,
-            label = { Text("历史") },
-            modifier = Modifier.semantics { contentDescription = "打开最近对话" },
-          )
-          AssistChip(
-            onClick = onShowSettings,
-            label = { Text("设置") },
-            modifier = Modifier.semantics { contentDescription = "打开设置" },
+        items(uiState.timeline, key = TimelineItem::id) { item ->
+          TimelineBubble(
+            item = item,
+            consumedCallbackCardIds = uiState.sessionContextState.consumedCallbackCardIds,
+            onSelectionSubmit = onSelectionSubmit,
+            onOpenLink = { uri -> openExternalLink(context = context, uri = uri) },
           )
         }
       }
 
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StatusPill(text = "当前模型", containerColor = WhaleSurface, contentColor = WhaleInk)
-        StatusPill(
-          text = if (uiState.hasReadyApiKey()) "Key 已就绪" else "Key 待配置",
-          containerColor = if (uiState.hasReadyApiKey()) MaterialTheme.colorScheme.secondaryContainer else WhaleSurface,
-          contentColor = if (uiState.hasReadyApiKey()) MaterialTheme.colorScheme.onSecondaryContainer else WhaleInk,
-        )
-      }
-
-      CompactWorkflowSelector(
-        availableWorkflowPacks = uiState.availableWorkflowPacks,
-        selectedWorkflowPackId = uiState.selectedWorkflowPackId,
-        onWorkflowPackSelected = onWorkflowPackSelected,
-      )
-
-      SessionContextSummary(uiState = uiState)
-    }
-  }
-}
-
-@Composable
-private fun CompactWorkflowSelector(
-  availableWorkflowPacks: List<WorkflowPromptPack>,
-  selectedWorkflowPackId: String,
-  onWorkflowPackSelected: (String) -> Unit,
-) {
-  Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Text("工作流", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Row(
-      modifier = Modifier.horizontalScroll(rememberScrollState()),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-      availableWorkflowPacks.forEach { pack ->
-        AssistChip(
-          onClick = { onWorkflowPackSelected(pack.id) },
-          label = { Text(pack.title) },
-          leadingIcon = {
-            Box(
-              modifier =
-                Modifier
-                  .size(10.dp)
-                  .background(if (pack.id == selectedWorkflowPackId) WhaleAccent else WhaleAccentSoft, CircleShape),
+      if (uiState.timeline.isEmpty()) {
+        Column(
+          modifier = Modifier
+            .align(Alignment.Center)
+            .padding(horizontal = 32.dp)
+            .offset(y = (-48).dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+          ) {
+            Text(
+              "🐋",
+              style = MaterialTheme.typography.headlineMedium,
             )
-          },
+            Text(
+              "你好，我是 OpenWhale",
+              style = MaterialTheme.typography.titleLarge,
+              color = WhaleInk,
+              fontWeight = FontWeight.SemiBold,
+            )
+          }
+          Text(
+            "一个致力于生活服务的手机端 Agent",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          )
+        }
+      }
+
+      Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+        ComposerBar(
+          inputText = inputText,
+          uiState = uiState,
+          onInputChange = onInputChange,
+          onSendClick = onSendClick,
+          onMeasured = { composerHeightPx = it },
         )
       }
     }
@@ -388,39 +340,68 @@ private fun CompactWorkflowSelector(
 }
 
 @Composable
-private fun SessionContextSummary(uiState: AgentSessionSnapshot) {
-  val hasContext =
-    uiState.sessionContextState.selectedDestination != null ||
-      uiState.sessionContextState.hotelFilterContext.maxPrice != null ||
-      uiState.sessionContextState.hotelFilterContext.maxDistanceKm != null ||
-      uiState.errorMessage != null
-  if (!hasContext) {
-    return
-  }
-
-  val destination = uiState.sessionContextState.selectedDestination?.name ?: "未选择"
-  val price = uiState.sessionContextState.hotelFilterContext.maxPrice?.let { "≤¥$it" } ?: "未设置"
-  val distance = uiState.sessionContextState.hotelFilterContext.maxDistanceKm?.let { "≤${it}km" } ?: "未设置"
-
-  Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = RoundedCornerShape(22.dp)) {
-    Column(
-      modifier = Modifier.fillMaxWidth().padding(14.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp),
+private fun ChatTopBar(
+  uiState: AgentSessionSnapshot,
+  onMenuClick: () -> Unit,
+  onNewChatClick: () -> Unit,
+) {
+  val hasApiKey = uiState.hasReadyApiKey()
+  Surface(
+    color = MaterialTheme.colorScheme.surface,
+    shadowElevation = 2.dp,
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .statusBarsPadding()
+        .padding(horizontal = 4.dp, vertical = 4.dp),
+      verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text("当前会话", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-      Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-      ) {
-        StatusPill(text = destination, containerColor = WhaleSurface, contentColor = WhaleInk)
-        StatusPill(text = price, containerColor = WhaleSurface, contentColor = WhaleInk)
-        StatusPill(text = distance, containerColor = WhaleSurface, contentColor = WhaleInk)
+      IconButton(onClick = onMenuClick) {
+        Icon(
+          imageVector = Icons.Filled.Menu,
+          contentDescription = "打开历史面板",
+          tint = WhaleInk,
+        )
       }
-      uiState.errorMessage?.let { errorMessage ->
+
+      Column(
+        modifier = Modifier.weight(1f),
+        horizontalAlignment = Alignment.CenterHorizontally,
+      ) {
         Text(
-          errorMessage,
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.error,
+          "OpenWhale",
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.SemiBold,
+          color = WhaleInk,
+        )
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+          Box(
+            modifier = Modifier
+              .size(8.dp)
+              .background(
+                if (hasApiKey) Color(0xFF4CAF50) else Color(0xFFE53935),
+                CircleShape,
+              ),
+          )
+          Text(
+            if (hasApiKey) uiState.modelLabel else "模型 API Key 未填写",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+          )
+        }
+      }
+
+      IconButton(onClick = onNewChatClick) {
+        Icon(
+          imageVector = Icons.Filled.Edit,
+          contentDescription = "新对话",
+          tint = WhaleInk,
         )
       }
     }
@@ -459,7 +440,7 @@ private fun ComposerBar(
         maxLines = 4,
         shape = RoundedCornerShape(22.dp),
         label = { Text("消息") },
-        placeholder = { Text("例如：导航到静安寺") },
+        placeholder = { Text("") },
       )
       Button(
         onClick = onSendClick,
@@ -577,42 +558,79 @@ private fun ModelSelectionPanel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HistorySheet(items: List<RecentConversationPreview>, onDismissRequest: () -> Unit) {
+private fun HistorySheet(
+  uiState: AgentSessionSnapshot,
+  onWorkflowPackSelected: (String) -> Unit,
+  onShowSettings: () -> Unit,
+  onDismissRequest: () -> Unit,
+) {
   ModalBottomSheet(onDismissRequest = onDismissRequest) {
     Column(
       modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
       verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-      Text("最近对话", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
-      Text(
-        "当前先展示本地最近会话摘要与占位数据，为后续真正的历史持久化预留入口。",
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-      )
-      if (items.isEmpty()) {
-        Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = RoundedCornerShape(20.dp)) {
-          Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("还没有可展示的最近对话", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
-            Text("先发一条消息，后续这里会聚合最近会话摘要。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-          }
-        }
-      } else {
-        items.forEachIndexed { index, item ->
-          Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth(),
-          ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-              Text(item.title, style = MaterialTheme.typography.titleMedium, color = WhaleInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
-              Text(item.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-          }
-          if (index != items.lastIndex) {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+      Text("菜单", style = MaterialTheme.typography.headlineSmall, color = WhaleInk)
+
+      // Workflow selector
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("工作流", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+          modifier = Modifier.horizontalScroll(rememberScrollState()),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          uiState.availableWorkflowPacks.forEach { pack ->
+            AssistChip(
+              onClick = { onWorkflowPackSelected(pack.id) },
+              label = { Text(pack.title) },
+              leadingIcon = {
+                Box(
+                  modifier =
+                    Modifier
+                      .size(10.dp)
+                      .background(
+                        if (pack.id == uiState.selectedWorkflowPackId) WhaleAccent else WhaleAccentSoft,
+                        CircleShape,
+                      ),
+                )
+              },
+            )
           }
         }
       }
+
+      // Settings entry button
+      Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onShowSettings() },
+      ) {
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+          ) {
+            Icon(
+              imageVector = Icons.Filled.Settings,
+              contentDescription = null,
+              tint = WhaleInk,
+              modifier = Modifier.size(22.dp),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+              Text("设置", style = MaterialTheme.typography.titleMedium, color = WhaleInk)
+              Text(
+                "API Key 配置 · 模型选择 · 调试信息",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+          }
+        }
+      }
+
       Spacer(modifier = Modifier.height(8.dp))
     }
   }
@@ -1402,24 +1420,6 @@ private fun StatusPill(text: String, containerColor: Color, contentColor: Color)
   }
 }
 
-private fun buildRecentConversationItems(uiState: AgentSessionSnapshot): List<RecentConversationPreview> {
-  val workflowTitle = uiState.availableWorkflowPacks.firstOrNull { it.id == uiState.selectedWorkflowPackId }?.title ?: "当前工作流"
-  return uiState.timeline
-    .filter { it.role == TimelineItemRole.User }
-    .takeLast(6)
-    .asReversed()
-    .mapIndexed { index, item ->
-      RecentConversationPreview(
-        title = item.text,
-        subtitle = buildString {
-          append(workflowTitle)
-          append(" · 最近片段 #")
-          append(index + 1)
-        },
-      )
-    }
-}
-
 private fun openExternalLink(context: android.content.Context, uri: String) {
   runCatching {
     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -1479,11 +1479,6 @@ private fun String.toAnnotatedString(): AnnotatedString {
     }
   }
 }
-
-private data class RecentConversationPreview(
-  val title: String,
-  val subtitle: String,
-)
 
 @Preview(showBackground = true, widthDp = 412, heightDp = 917)
 @Composable

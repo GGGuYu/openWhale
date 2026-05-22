@@ -388,7 +388,7 @@ private fun ChatTopBar(
               ),
           )
           Text(
-            if (hasApiKey) uiState.modelLabel else "模型 API Key 未填写",
+            if (hasApiKey) "${uiState.modelLabel} with Max" else "模型 API Key 未填写",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,

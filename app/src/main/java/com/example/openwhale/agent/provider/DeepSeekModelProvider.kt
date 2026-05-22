@@ -239,6 +239,9 @@ private data class ChatCompletionRequest(
   val temperature: Double,
   val stream: Boolean = false,
   val thinking: DeepSeekThinkingConfig? = null,
+  // 思考强度：支持 "high" / "max"，目前写死 max 以获得最佳推理质量
+  @SerialName("reasoning_effort")
+  val reasoningEffort: String = "max",
 )
 
 @Serializable

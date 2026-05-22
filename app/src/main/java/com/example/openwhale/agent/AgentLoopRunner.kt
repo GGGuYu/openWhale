@@ -195,10 +195,21 @@ class AgentLoopRunner(
     var nextState = initialState
     val finalizedToolCalls = mutableListOf<FinalizedToolCall>()
     preparedToolCalls.forEach { preparedToolCall ->
+      val toolItemId = java.util.UUID.randomUUID().toString()
       debugLogger.log(category = "loop", message = "进入工具阶段：${preparedToolCall.toolCall.name}")
+      onPlaybackEvent(
+        AgentPlaybackEvent.ToolStart(
+          turnId = turnId,
+          toolItemId = toolItemId,
+          toolName = preparedToolCall.toolCall.name,
+        ),
+      )
+      if (preparedToolCall.tool.kind == AgentToolKind.Data && runtimeOptions.dataToolDelayMs > 0) {
+        kotlinx.coroutines.delay(runtimeOptions.dataToolDelayMs)
+      }
       val executedToolCall = toolRegistry.execute(preparedToolCall = preparedToolCall, currentState = nextState)
       nextState = executedToolCall.result.nextState
-      val finalizedToolCall = toolRegistry.finalize(executedToolCall)
+      val finalizedToolCall = toolRegistry.finalize(executedToolCall, toolItemId = toolItemId)
       finalizedToolCalls += finalizedToolCall
       onPlaybackEvent(
         AgentPlaybackEvent.ToolFeedback(

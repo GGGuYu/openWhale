@@ -21,7 +21,7 @@ class AgentSession(
       modelProvider = modelProvider,
       toolRegistry = toolRegistry,
       debugLogger = debugLogger,
-      runtimeOptions = AgentRuntimeOptions(allowCompatibilityCardFallback = false),
+      runtimeOptions = AgentRuntimeOptions(allowCompatibilityCardFallback = false, dataToolDelayMs = 1500L),
     )
   private val availableWorkflowPacks = workflowPromptPackRepository.list()
   private val baseModelConfig = modelConfig
@@ -196,11 +196,43 @@ class AgentSession(
               activeAssistantItemId = null
             }
 
-            is AgentPlaybackEvent.ToolFeedback -> {
+            is AgentPlaybackEvent.ToolStart -> {
               val currentSnapshot = _snapshot.value
               _snapshot.value =
                 currentSnapshot.copy(
-                  timeline = currentSnapshot.timeline + event.item,
+                  timeline =
+                    currentSnapshot.timeline +
+                      TimelineItem(
+                        id = event.toolItemId,
+                        role = TimelineItemRole.Tool,
+                        title = event.toolName,
+                        text = "",
+                        turnId = event.turnId,
+                        isStreaming = true,
+                      ),
+                  modelLabel = modelConfig.modelId,
+                  supportedModelIds = modelConfig.supportedModelIds,
+                  sessionContextState = sessionContextState,
+                  apiKeyConfigured = modelConfig.apiKey.isNotBlank(),
+                  hasLocalApiKeyOverride = localApiKeyOverride != null,
+                  apiKeyStatusText = apiKeyStatusText(),
+                  debugEvents = debugLogger.events.value,
+                  isSending = true,
+                )
+            }
+
+            is AgentPlaybackEvent.ToolFeedback -> {
+              val currentSnapshot = _snapshot.value
+              val updatedTimeline = currentSnapshot.timeline.toMutableList()
+              val existingIndex = updatedTimeline.indexOfFirst { it.id == event.item.id }
+              if (existingIndex >= 0) {
+                updatedTimeline[existingIndex] = event.item.copy(isStreaming = false)
+              } else {
+                updatedTimeline += event.item
+              }
+              _snapshot.value =
+                currentSnapshot.copy(
+                  timeline = updatedTimeline,
                   modelLabel = modelConfig.modelId,
                   supportedModelIds = modelConfig.supportedModelIds,
                   sessionContextState = sessionContextState,

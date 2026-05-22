@@ -1176,13 +1176,29 @@ private fun ToolExecutionCard(item: TimelineItem) {
     shadowElevation = 1.dp,
     modifier = Modifier.widthIn(max = 288.dp),
   ) {
-    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
       Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(marker, style = MaterialTheme.typography.labelSmall)
         Text("工具反馈", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+        if (item.isStreaming) {
+          Spacer(modifier = Modifier.width(6.dp))
+          CircularProgressIndicator(
+            modifier = Modifier.size(12.dp),
+            strokeWidth = 1.6.dp,
+            color = MaterialTheme.colorScheme.primary,
+          )
+        }
       }
       Text(item.title, color = WhaleInk, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-      Text(item.text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+      if (item.isStreaming) {
+        Text(
+          "执行中…",
+          color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.62f),
+          style = MaterialTheme.typography.labelSmall,
+        )
+      } else {
+        Text(item.text, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+      }
     }
   }
 }

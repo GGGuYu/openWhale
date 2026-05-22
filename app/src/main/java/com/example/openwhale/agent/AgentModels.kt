@@ -108,6 +108,7 @@ data class ToolExecutionResult(
 
 data class AgentRuntimeOptions(
   val allowCompatibilityCardFallback: Boolean = false,
+  val dataToolDelayMs: Long = 0L,
 )
 
 data class PreparedToolCall(
@@ -204,6 +205,12 @@ sealed interface AgentPlaybackEvent {
     val text: String,
     val cardPayload: AgentCardPayload? = null,
     val done: Boolean,
+  ) : AgentPlaybackEvent
+
+  data class ToolStart(
+    override val turnId: String,
+    val toolItemId: String,
+    val toolName: String,
   ) : AgentPlaybackEvent
 
   data class ToolFeedback(

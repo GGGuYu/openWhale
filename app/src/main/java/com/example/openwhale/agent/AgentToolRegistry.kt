@@ -21,7 +21,7 @@ class AgentToolRegistry(
     return ExecutedToolCall(preparedCall = preparedToolCall, result = result)
   }
 
-  fun finalize(executedToolCall: ExecutedToolCall): FinalizedToolCall {
+  fun finalize(executedToolCall: ExecutedToolCall, toolItemId: String = java.util.UUID.randomUUID().toString()): FinalizedToolCall {
     val toolCall = executedToolCall.preparedCall.toolCall
     val result = executedToolCall.result
     debugLogger.log(category = "tool", message = "${toolCall.name} 完成，结果摘要=${result.displayText}")
@@ -37,7 +37,7 @@ class AgentToolRegistry(
         ),
       toolFeedbackItem =
         TimelineItem(
-          id = java.util.UUID.randomUUID().toString(),
+          id = toolItemId,
           role = TimelineItemRole.Tool,
           title = toolCall.name,
           text = result.displayText,

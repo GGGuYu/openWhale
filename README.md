@@ -19,7 +19,7 @@
 <p align="center">
   <img src="readme_img/img1.jpg" width="240" />
   <img src="readme_img/img2.jpg" width="240" />
-  <img src="readme_img/img3.jpg" width="240" />
+  <img src="readme_img/img4.jpg" width="240" />
 </p>
 
 ---

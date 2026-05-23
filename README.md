@@ -17,9 +17,9 @@
 <br>
 
 <p align="center">
-  <img src="readme_img/img1.jpg" alt="OpenWhale 截图1" width="280" />
-  <img src="readme_img/img2.jpg" alt="OpenWhale 截图2" width="280" />
-  <img src="readme_img/img3.jpg" alt="OpenWhale 截图3" width="280" />
+  <img src="readme_img/img1.jpg" width="240" />
+  <img src="readme_img/img2.jpg" width="240" />
+  <img src="readme_img/img3.jpg" width="240" />
 </p>
 
 ---
@@ -225,9 +225,24 @@ cd openWhale
 - [ ] 多模态输入（拍照识店、语音导航）
 - [ ] 多 Agent 协作（导航 + 酒店 + 餐厅协同规划）
 
-## 🛠️ 技术栈
+## 🛠️ 技术栈 & 开发工具
 
-Kotlin · Jetpack Compose · Material3 · StateFlow · OkHttp · kotlinx.serialization · MCP
+**App 技术栈**：Kotlin · Jetpack Compose · Material3 · StateFlow · OkHttp · kotlinx.serialization · MCP
+
+**本项目开发工具**：Claude Code + OpenSpec
+
+> ⚠️ **当前为 Demo 阶段**，所有工具使用 mock 数据。真实 MCP Server 接入在下一阶段计划中。
+
+## 🤖 AI Agent 贡献指南
+
+本项目推荐 AI Agent 作为主要开发方式。如果你是一个 Agent 拉取了本仓库，请按以下流程工作：
+
+1. **先读 README**（你在看的就是）——了解项目定位和核心设计理念
+2. **再读知识库**（[`kb/`](./kb/)）——理解架构、Agent 运行时、工作流、UI 层的完整细节
+3. **修改代码**——完成你的任务
+4. **反向更新知识库**——代码改动后，**务必同步更新 `kb/` 中对应的文档**，确保知识库始终反映代码的最新状态
+
+知识库是项目的活文档层。OpenSpec 的 spec 文件属于 change 级别的提案（更适合单人/单 Agent 的结构化开发流），而 KB 文件是跨 change 的持续维护层——Agent 每次修改后都应该更新它。
 
 ## 📄 License
 
